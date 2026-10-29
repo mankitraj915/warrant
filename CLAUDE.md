@@ -50,13 +50,17 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 
 - `check`: ruff lint + format check, `mypy --strict` on `kernel/`, pytest (Hypothesis derandomized
   via the `check` profile). Also `lint`, `typecheck`, `test`.
-- `fuzz`: long-running non-interference fuzzing (`HYPOTHESIS_PROFILE=fuzz`).
-- `eval`: default offline evaluation (no LLM).
+- `fuzz`: non-interference fuzzing, 20,000 randomized examples (`HYPOTHESIS_PROFILE=fuzz`).
+  Extra arguments pass through: `tasks.py fuzz --hypothesis-seed=N` reproduces a run.
+- `eval`: default offline evaluation (no LLM): dev suite × {warrant+oracle, warrant+gullible,
+  undefended+gullible, leaked+gullible}; writes `results/phase1.json` (gitignored) and prints
+  tables.
 - `eval-llm`: evaluation with the local model. Phase 4, not yet.
 - `report`: regenerate `docs/RESULTS.md`. Phase 5, not yet.
 - `demo`: scripted demonstration. Phase 5, not yet.
 
 ## Current status
 
-Phase: 1 in progress (Gate 0 approved 2026-10-29). See `docs/DECISIONS.md` "Phase 1 plan" for
-the step list and progress.
+Phase: 1, steps 1–6 done (Gate 0 approved 2026-10-29). Next: bounded fuzz run, Gate 1
+independent review, Gate 1 report (`docs/reviews/GATE1_REVIEW.md`), then stop for the owner.
+See `docs/DECISIONS.md` "Phase 1 plan" and D-023 onward.

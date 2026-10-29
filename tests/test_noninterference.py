@@ -11,7 +11,7 @@ so a vacuous pass is visible.
 
 from typing import Any
 
-from hypothesis import event, given, settings
+from hypothesis import event, given
 from hypothesis import strategies as st
 
 from planners.builders import Json
@@ -51,7 +51,6 @@ def ni_property(data: Any) -> None:
     check_ni4(r2, pre2)
 
 
-@settings(max_examples=200)
 @given(st.data())
 def test_noninterference(data: Any) -> None:
     ni_property(data)

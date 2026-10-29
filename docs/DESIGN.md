@@ -439,8 +439,12 @@ Applies to `issue_refund(ticket_id, order_id, amount)`.
 - **Postcondition:** each executed refund admitted by this rule is on `C`'s unique eligible
   order, for exactly its refundable amount, and is the only refund ever executed for ticket `T`,
   across all runs.
-- **Residual risk:**
+- **Residual risk:** the one bit cuts both ways.
   - *Suppression*: injected text can turn an automatic refund into an approval request.
+  - *Triggering* (measured in Phase 1, DECISIONS F-1): injected text can turn "no refund" into
+    an automatic refund of `C`'s single eligible order, for its refundable amount, once per
+    ticket. The money still goes only to the ticket's own customer and the action is fully
+    determined by trusted data; what the text controls is whether it happens.
   - With `θ > 0`, *redirection* among `C`'s eligible orders whose refundable amount is ≤ `θ`.
 - **Within-allowed-set attack:** if the customer has two or more eligible orders, no rule can
   tell the customer's genuine choice from an injected one, because both are text in the same
@@ -456,10 +460,13 @@ affected orders is trusted structured authority.
 ## 7. Approval binding
 
 - **Canonical action** (review finding 9):
-  `{"tool", "args": {param: value}, "labels": {param: U, "pc": U}, "verdict", "reason"}`.
+  `{"tool", "args": {param: value}, "labels": {param: U, "pc": U}, "verdict"}`. Verdict
+  *reasons* are shown to the approver but not hashed: they explain a verdict and do not
+  authorize anything (D-023).
   - Values are ints (money in minor units), strings, bools, or lists of these.
   - `U` is the sorted origin list (or `"★"`).
-  - Strings are NFC-normalised **at resolution**, so the executed bytes are the hashed bytes.
+  - Strings are to be NFC-normalised **at resolution**, so the executed bytes are the hashed
+    bytes. Not yet implemented: no Phase 1 consequential tool takes a string (D-025).
   - The kernel executes exactly the canonical values.
 - **Canonical set:** `{"run_id": r, "actions": [a1 … an]}` in plan order, serialised as JSON with
   sorted keys, `(",", ":")` separators and UTF-8. Hash: SHA-256.
@@ -474,8 +481,8 @@ affected orders is trusted structured authority.
 - **Execution check:** the kernel recomputes the hash of the set it is about to execute; any
   divergence aborts with nothing executed. Per-action re-checks follow §5 step 4.
 - **Presentation:** the approval view is rendered from the hashed object. It therefore shows
-  every argument's *and the pc's* untrusted origins and each verdict's reason. A literal-argument
-  action under a tainted `map` is visibly untrusted-selected.
+  every argument's *and the pc's* untrusted origins, each verdict, and (unhashed) each reason.
+  A literal-argument action under a tainted `map` is visibly untrusted-selected.
 - **Simulated approver:** in evaluation it approves iff the canonical set equals the task's
   ground-truth set. That makes it an idealised human, so evaluated approval safety is an upper
   bound, reported next to the steering rate.
@@ -618,7 +625,7 @@ This closes laundering across runs.
 |---|---|---|
 | `MAX_STEPS` | 64 | static |
 | `MAX_DEPTH` | 2 | nesting of map/filter, static |
-| `MAX_LIST` | 100 | runtime truncation, logged |
+| `MAX_LIST` | 100 | runtime truncation (`LIMIT` on reads, cap on `map`); not logged in Phase 1 |
 | `MAX_EXTRACT` | 5 | extractor list length |
 | `MAX_ORIGINS` | 32 | collapse to `★` |
 | `θ` | 0 | ownership-rule ambiguity threshold (minor units) |
