@@ -131,7 +131,8 @@ def multirun_property(data: Any) -> None:
         tickets = [NEW_TICKET, NEW_TICKET, NEW_TICKET, CASE_TICKET]
         body = data.draw(_ticket_text(world), label="new ticket body")
         env.db.execute(
-            "INSERT INTO tickets VALUES (?, ?, 'again', ?, 'open')",
+            "INSERT INTO tickets (id, customer_id, subject, body, status)"
+            " VALUES (?, ?, 'again', ?, 'open')",
             (NEW_TICKET, CASE_CUSTOMER, body),
         )
         later = world.extend(tickets=(Ticket(NEW_TICKET, CASE_CUSTOMER, "again", body),))

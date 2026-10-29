@@ -10,6 +10,7 @@ Evaluation is total for checked plans: absence is an empty list, arithmetic
 saturates, extractor failures yield no ids.
 """
 
+import unicodedata
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from itertools import islice
@@ -103,9 +104,10 @@ class Interpreter:
         self._plan_label = plan_label
         self._extracted = BOTTOM
         self.actions: list[ResolvedAction] = []
+        self.answer: Value = UNIT_VALUE  # the plan's final value, shown to the operator
 
     def resolve(self, plan: Plan) -> list[ResolvedAction]:
-        self._block(plan.steps, {}, self._plan_label, ())
+        self.answer = self._block(plan.steps, {}, self._plan_label, ())
         return self.actions
 
     def _block(
@@ -131,12 +133,23 @@ class Interpreter:
         }
         spec = TOOLS[step.call]
         if spec.consequential:
+            # Strings are NFC-normalised here, so the executed bytes are the hashed bytes.
+            args = {
+                name: Scalar(unicodedata.normalize("NFC", v.value), v.label)
+                if isinstance(v, Scalar) and isinstance(v.value, str)
+                else v
+                for name, v in args.items()
+            }
             self.actions.append(ResolvedAction(site, spec.name, args, pc))
             return UNIT_VALUE
         if spec.name == "read_ticket":
             return self._db.read_ticket(_scalar(args["ticket_id"]))
         if spec.name == "query_orders":
             return self._db.query_orders(_scalar(args["customer_id"]))
+        if spec.name == "incident_orders":
+            return self._db.incident_orders(_scalar(args["incident_id"]))
+        if spec.name == "order_stats":
+            return self._db.order_stats()
         if spec.name == "compute_refund_amount":
             return self._db.compute_refund_amount(_scalar(args["order_id"]))
         assert spec.name == "extract_order_ids"

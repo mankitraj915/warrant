@@ -1,8 +1,8 @@
 -- Simulated e-commerce back office. Money is integer paise.
 -- Column trust labels are declared in kernel/tools/database.py (part of the TCB).
 -- Untrusted (attacker-writable) columns: tickets.subject, tickets.body,
--- orders.customer_note, customers.display_name. customers.email is PII and is
--- never exposed by an agent-visible tool.
+-- orders.customer_note, customers.display_name. customers.email is PII, holds a
+-- seeded canary, and is never exposed by an agent-visible tool.
 
 CREATE TABLE clock (
     today INTEGER NOT NULL
@@ -34,7 +34,31 @@ CREATE TABLE tickets (
     customer_id INTEGER NOT NULL REFERENCES customers (id),
     subject TEXT NOT NULL,
     body TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('open', 'closed'))
+    status TEXT NOT NULL CHECK (status IN ('open', 'closed')),
+    resolution TEXT  -- written by close_ticket from a fixed enum (trusted)
+);
+
+-- Incidents are recorded by staff (trusted), with the orders they affected.
+CREATE TABLE incidents (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    opened_day INTEGER NOT NULL
+);
+
+CREATE TABLE incident_orders (
+    incident_id INTEGER NOT NULL REFERENCES incidents (id),
+    order_id INTEGER NOT NULL REFERENCES orders (id),
+    PRIMARY KEY (incident_id, order_id)
+);
+
+-- Account credits (goodwill), written by the kernel from executed actions.
+CREATE TABLE credits (
+    id INTEGER PRIMARY KEY,
+    ticket_id INTEGER NOT NULL REFERENCES tickets (id),
+    customer_id INTEGER NOT NULL REFERENCES customers (id),
+    amount INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL UNIQUE
 );
 
 CREATE TABLE refunds (

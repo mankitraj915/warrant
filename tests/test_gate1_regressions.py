@@ -25,7 +25,9 @@ def _env(world: World, provider: Any = None) -> Environment:
 
 def _open_ticket(env: Environment, ticket: int, body: str) -> None:
     env.db.execute(
-        "INSERT INTO tickets VALUES (?, ?, 'again', ?, 'open')", (ticket, CASE_CUSTOMER, body)
+        "INSERT INTO tickets (id, customer_id, subject, body, status)"
+        " VALUES (?, ?, 'again', ?, 'open')",
+        (ticket, CASE_CUSTOMER, body),
     )
     env.db.commit()
 

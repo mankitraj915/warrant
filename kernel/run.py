@@ -30,7 +30,7 @@ from .plan_lang import PlanRejected, check_plan, parse_plan
 from .policy import Verdict, decide
 from .tools.database import Database, lossless_text
 from .tools.registry import signatures
-from .values import Record, Scalar
+from .values import Record, Scalar, UnitV, plain, whole_label
 
 OPERATOR = Label.trusted_source("operator")
 Outcome = Literal[
@@ -68,6 +68,8 @@ class RunResult:
     plan_label: Label = OPERATOR
     planner_input_hash: str | None = None
     approved: bool = False
+    answer: Any = None  # the plan's final value, for the operator (plain data)
+    answer_sinks: list[str] | None = None  # None: unrestricted
 
 
 def _origins(label: Label) -> list[str] | str:
@@ -99,6 +101,8 @@ def _audit(db: sqlite3.Connection, r: RunResult, raw_plan: Any, task_id: str | N
         "approval_request": r.approval_request,
         "approval_hash": r.approval_hash,
         "approved": r.approved,
+        "answer": r.answer,
+        "answer_sinks": r.answer_sinks,
         "executed": [
             {
                 "site": list(x.site),
@@ -144,8 +148,10 @@ def _decide_and_execute(
         return RunResult(run_id, "rejected", str(exc), plan_label=plan_label)
 
     db = Database(env.db)
-    actions = tuple(Interpreter(db, env.extractor, plan_label).resolve(plan))
+    interpreter = Interpreter(db, env.extractor, plan_label)
+    actions = tuple(interpreter.resolve(plan))
     verdicts, log = decide(actions, db.trusted)
+    answer_label = whole_label(interpreter.answer)
     result = RunResult(
         run_id,
         "executed",
@@ -154,6 +160,8 @@ def _decide_and_execute(
         verdicts=tuple(verdicts),
         rule_log=tuple(log),
         plan_label=plan_label,
+        answer=None if isinstance(interpreter.answer, UnitV) else plain(interpreter.answer),
+        answer_sinks=None if answer_label.sinks is None else sorted(answer_label.sinks),
     )
     blocked = [v.reason for v in verdicts if v.kind == "BLOCK"]
     if blocked:

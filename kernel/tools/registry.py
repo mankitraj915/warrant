@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 ScalarName = Literal["Int", "Money", "Bool", "Str"]
-IdKind = Literal["Order", "Customer", "Ticket"]
+IdKind = Literal["Order", "Customer", "Ticket", "Incident"]
 
 
 @dataclass(frozen=True)
@@ -82,7 +82,13 @@ RECORDS: dict[str, dict[str, Type]] = {
         "refundable": MONEY,
         "customer_note": STR,
     },
+    # Aggregate row: orders grouped by status (groups smaller than MIN_GROUP suppressed).
+    "OrderStat": {"status": STR, "orders": INT, "total": MONEY},
 }
+
+# Closed vocabularies for string arguments of consequential tools (policy-checked).
+RESOLUTIONS = frozenset({"refunded", "credited", "no_action", "escalated"})
+CREDIT_REASONS = frozenset({"goodwill", "late_delivery"})
 
 
 @dataclass(frozen=True)
@@ -124,6 +130,39 @@ TOOLS: dict[str, ToolSpec] = {
             TList(TId("Order")),
             False,
             "Order ids mentioned in untrusted text (quarantined extractor, at most 5).",
+        ),
+        ToolSpec(
+            "incident_orders",
+            (("incident_id", TId("Incident")),),
+            TList(TRec("Order")),
+            False,
+            "Orders affected by a staff-recorded incident, with their refundable amount.",
+        ),
+        ToolSpec(
+            "order_stats",
+            (),
+            TList(TRec("OrderStat")),
+            False,
+            "Order counts and totals by status (aggregate; for the operator only).",
+        ),
+        ToolSpec(
+            "close_ticket",
+            (("ticket_id", TId("Ticket")), ("resolution", STR)),
+            UNIT,
+            True,
+            f"Close a ticket. resolution is one of {sorted(RESOLUTIONS)}.",
+        ),
+        ToolSpec(
+            "issue_credit",
+            (
+                ("ticket_id", TId("Ticket")),
+                ("customer_id", TId("Customer")),
+                ("amount", MONEY),
+                ("reason", STR),
+            ),
+            UNIT,
+            True,
+            f"Account credit for the ticket's customer. reason is one of {sorted(CREDIT_REASONS)}.",
         ),
         ToolSpec(
             "issue_refund",

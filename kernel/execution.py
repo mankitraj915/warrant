@@ -55,6 +55,28 @@ class _Unknown:
 UNKNOWN = _Unknown()
 
 
+def _execute_local(action: ResolvedAction, db: sqlite3.Connection) -> Executed:
+    """Effects that only write this database (no provider): one transaction each."""
+    args = action.canonical_args()
+    ticket = int(args["ticket_id"])
+    if action.tool == "close_ticket":
+        key = f"close:{ticket}"
+        db.execute(
+            "UPDATE tickets SET status = 'closed', resolution = ? WHERE id = ? AND status = 'open'",
+            (args["resolution"], ticket),
+        )
+    else:
+        assert action.tool == "issue_credit"
+        key = f"credit:{ticket}"
+        db.execute(
+            "INSERT INTO credits (ticket_id, customer_id, amount, reason, idempotency_key)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (ticket, int(args["customer_id"]), int(args["amount"]), args["reason"], key),
+        )
+    db.commit()
+    return Executed(action.site, action.tool, key, "local")
+
+
 def recover(db: sqlite3.Connection, provider: PaymentProvider) -> None:
     """Reconcile refund rows left ``pending`` by a crash, before any decision.
 
@@ -87,6 +109,9 @@ def execute(
         now, _ = decide_one(action, actions, TrustedReader(db))
         if now.kind != decided.kind:
             return ("partial" if done else "aborted"), done
+        if action.tool != "issue_refund":
+            done.append(_execute_local(action, db))
+            continue
         args = action.canonical_args()
         ticket, order, amount = int(args["ticket_id"]), int(args["order_id"]), int(args["amount"])
         key = f"refund:{order}:{ticket}"
