@@ -1,37 +1,44 @@
 """Test-wide configuration: network blocking and Hypothesis profiles.
 
-Network access is blocked when this conftest is registered (before any test
-module is imported), so neither imports nor tests can open outbound sockets.
+Network access is blocked by a ``sys.addaudithook`` installed when this
+conftest is registered (before any test module is imported). Audit events are
+raised by the C socket implementation, so the block also covers ``_socket``
+and every Python wrapper. It cannot be uninstalled, and it does not reach
+subprocesses.
 
 Hypothesis runs derandomized under the default ``check`` profile so
 ``make check`` is reproducible. Set ``HYPOTHESIS_PROFILE=fuzz`` for long runs.
 """
 
 import os
-import socket
-from typing import NoReturn
+import sys
 
 from hypothesis import settings
+
+NETWORK_EVENTS = frozenset(
+    {
+        "socket.connect",  # also raised by connect_ex
+        "socket.sendto",
+        "socket.sendmsg",
+        "socket.getaddrinfo",
+        "socket.gethostbyname",
+        "socket.gethostbyaddr",
+        "socket.getnameinfo",
+    }
+)
 
 
 class NetworkAccessError(RuntimeError):
     """Raised when code under test attempts network access."""
 
 
-def _refuse(*_args: object, **_kwargs: object) -> NoReturn:
-    raise NetworkAccessError("network access is disabled during tests")
-
-
-def _block_network() -> None:
-    socket.socket.connect = _refuse  # type: ignore[method-assign,assignment]
-    socket.socket.connect_ex = _refuse  # type: ignore[method-assign,assignment]
-    socket.socket.sendto = _refuse  # type: ignore[method-assign,assignment]
-    socket.create_connection = _refuse  # type: ignore[assignment]
-    socket.getaddrinfo = _refuse  # type: ignore[assignment]
+def _refuse_network(event: str, _args: tuple[object, ...]) -> None:
+    if event in NETWORK_EVENTS:
+        raise NetworkAccessError(f"network access is disabled during tests ({event})")
 
 
 def pytest_configure() -> None:
-    _block_network()
+    sys.addaudithook(_refuse_network)
 
 
 settings.register_profile("check", derandomize=True, deadline=None, print_blob=True)
