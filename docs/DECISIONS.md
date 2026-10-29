@@ -677,3 +677,90 @@ Existence would then reach only whole-run suppression, and the taint could be dr
 such reads, removing T08's cost. It reverses list-shaped absence (Phase 1 decision) for
 tickets and needs NI-1 restated to exempt runs halted during resolution. Candidate for Gate 2
 discussion, with T08-like tasks in the Phase 2 suite to measure what it buys.
+
+---
+
+## Phase 2 plan (2026-10-30)
+
+Starts once the Gate 1 chunked fuzz passes with zero counterexamples (owner decision 1).
+Question: does the kernel stay sound and usable when it grows to the full tool set, executes
+approved actions, and faces attacks written by someone who has not seen the policies?
+
+**Steps** (commit after each, `check` green; invariant tests before the code they test):
+1. **Execution and audit.** Recovery of `pending` refund rows at the start of every run (by
+   provider status) and the SPEC §4.7 crash-injection test (kill between the provider call and
+   recording). A fresh random `run_id` per run (derived from the seed in evaluation). An
+   append-only `audit` table: planner-input hash, plan, resolved actions with labels,
+   verdicts, rule log, approval request/hash/decision, executed effects.
+2. **Approval binding** (DESIGN §7, NI-5 written first). Approval records bind
+   `(run_id, hash)`, are single-use and consumed before the first provider call. The kernel
+   recomputes the hash of the set it is about to execute. Simulated approver: approves iff the
+   canonical set equals the task's ground truth. NI-5: with an approve-everything approver,
+   the executed set equals the approved set; a changed set, a replayed approval, or a
+   different run never executes.
+3. **New tools** (SPEC Phase 2): `lookup_incident` (incidents table, staff-written, trusted;
+   affected orders), `close_ticket(ticket_id, resolution: enum)`, `issue_credit(ticket_id,
+   customer_id, amount, reason: enum)`, and an aggregate-only `order_stats` (grouped counts and
+   sums with a minimum group size of 5, sink `{operator}` only). P5 sink enforcement arrives
+   with it, plus seeded PII canaries and a scanner over planner input, resolved actions,
+   approval requests, audit rows and results JSON. NFC normalisation of strings at resolution
+   (D-025) arrives with the first string argument.
+4. **Rules (2–4 total).**
+   - Ownership rule gains `AUTO_REFUND_CAP` (owner decision 2). An amount above the cap means
+     the rule does not admit. Sweep values chosen after the suite exists and reported as a
+     curve (attack success, utility, approval burden, approval steering); no default picked
+     before the curve.
+   - Candidate second rule: bounded goodwill credit to the ticket's own customer, amount fixed
+     by the policy (not chosen by text), once per ticket. Admit/reject/residual tests first.
+   - Fuzzer: new tools in plan shapes, the reviewer's open gaps (non-literal ticket ids,
+     extraction from `subject`, maps in filter sources), mutants for each new rule.
+5. **Suites.** Dev suite to about 40 user tasks (including T08-like trusted reads of tickets for
+   customers with two eligible orders, incident bulk refunds, credits, closures) and 10–12
+   injection tasks. Gullible planner extended to the new tools. Harness runs the simulated
+   approver and reports approval burden and steering per rule.
+6. **Holdout.** A subagent that sees only `THREAT_MODEL.md`, `domain/schema.sql`, the tool
+   signatures and a prose description of the injection-task format (no policies, rules, or
+   DESIGN) writes `evals/tasks/holdout/`. Reported separately; never tuned against.
+7. **Decision-trace CLI** (`tasks.py trace <run_id>`), reading the audit table.
+8. Chunked fuzz, Gate 2 independent review, Gate 2 report.
+
+**Phase 2 decisions, made now:**
+- **Incidents are trusted authority.** Incident rows and their affected-order lists are
+  staff-written (THREAT_MODEL "incident records"), so incident-driven bulk refunds need no
+  rule.
+- **Aggregates go to the operator only.** `order_stats` results carry sinks `{operator}`;
+  P5 BLOCKs any consequential argument (including pc) whose sinks exclude the action's sink
+  (`customer:C` for refunds and credits). Minimum group size 5; smaller groups are suppressed,
+  not rounded.
+- **No new consequential tool takes free text.** Resolutions and credit reasons are enums, so
+  the agent never writes untrusted text into a trusted table (DESIGN §11).
+
+## D-024 (amended 2026-10-30): chunked fuzzing, measured memory, Gate 1 re-run result
+
+**Correction.** The earlier "about 100 MB" estimate for a fuzz run was wrong; it was never
+measured. Measured (peak working set inside the pytest process, `tests/conftest.py`):
+- baseline (1 example): 53.5 MB: interpreter, pytest, Hypothesis, pydantic;
+- 250 examples: 65.9 MB; 1,000 examples: 89.8 MB; about 30 KB more per example, linear.
+- **What grows:** Hypothesis's per-run bookkeeping of every generated example, held until the
+  run ends. tracemalloc between examples 100 and 700 of one run: `conjecture/data.py` +13.4
+  MiB, `datatree.py` +0.97 MiB, `choice.py` +0.71 MiB; this project's code +0.16 MiB.
+- **What does not:** four consecutive 300-example runs in one process stayed at 58–60 MB with
+  no live sqlite connections afterwards, so the per-example worlds are freed.
+- One 20,000-example process therefore needs about 650 MB, and the stopped post-fix run held
+  two properties (40,000 examples) in one process. That, not a leak, is why it was reaped.
+
+**Chunking.** `uv run --locked python scripts/tasks.py fuzz-chunks --test <property>
+--chunks 20 --examples 1000 --base-seed <S>`: each chunk is its own process with seed `S + i`,
+logged to `results/fuzz_chunks.jsonl`. 1,000 examples was sized from the first chunk's peak
+(89.4 MB). `tasks.py fuzz` (single 20k process per property) remains for machines with room.
+
+**Gate 1 re-run, commit dcd3434** (kernel identical to 5692a2b except the default-on
+`POINT_READ_EXISTENCE` extension point):
+
+| Property | Seeds | Passing | Failing | Invalid | Peak RSS (max) | Time |
+|---|---|---|---|---|---|---|
+| `test_noninterference` | 202610300–202610319 | 20,000 | 0 | 708 | 91.9 MB | 270 s |
+| `test_noninterference_multirun` | 202610400–202610419 | 20,000 | 0 | 2,293 | 90.6 MB | 216 s |
+
+Zero counterexamples. The multi-run property's invalid rate (about 11%) comes from
+Hypothesis rejecting oversized draws; recorded, not tuned.
