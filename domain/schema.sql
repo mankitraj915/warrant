@@ -1,5 +1,5 @@
 -- Simulated e-commerce back office. Money is integer paise.
--- Column trust labels are declared in kernel/tools/catalog.py (part of the TCB).
+-- Column trust labels are declared in kernel/tools/database.py (part of the TCB).
 -- Untrusted (attacker-writable) columns: tickets.subject, tickets.body,
 -- orders.customer_note, customers.display_name. customers.email is PII and is
 -- never exposed by an agent-visible tool.
@@ -45,3 +45,20 @@ CREATE TABLE refunds (
     idempotency_key TEXT NOT NULL UNIQUE,
     provider_ref TEXT NOT NULL
 );
+
+-- Kernel decision log: one row per run, append-only (enforced by triggers).
+CREATE TABLE audit (
+    id INTEGER PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    record TEXT NOT NULL
+);
+
+CREATE TRIGGER audit_no_update BEFORE UPDATE ON audit
+BEGIN
+    SELECT RAISE(ABORT, 'audit is append-only');
+END;
+
+CREATE TRIGGER audit_no_delete BEFORE DELETE ON audit
+BEGIN
+    SELECT RAISE(ABORT, 'audit is append-only');
+END;

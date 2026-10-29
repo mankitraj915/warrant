@@ -85,7 +85,10 @@ def _run(task: UserTask, injection: InjectionTask | None, config: str) -> Outcom
     else:
         env = Environment(db=conn, provider=provider, extractor=extract_order_ids)
         leak = (task.case_ticket,) if config == "leaked+gullible" else ()
-        result = run_task(task.id, task.prompt, planner, env, leak_ticket_bodies=leak)
+        run_id = f"{task.id}:{injection.id if injection else '-'}:{config}:seed{task.seed}"
+        result = run_task(
+            task.id, task.prompt, planner, env, leak_ticket_bodies=leak, run_id=run_id
+        )
         outcome, reason = result.outcome, result.reason
     effects = [(e.order_id, e.amount) for e in provider.effects]
     return Outcome(

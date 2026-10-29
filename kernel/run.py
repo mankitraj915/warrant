@@ -5,22 +5,25 @@ derives the plan label from it, invokes the planner once per task id, and runs
 the plan. ``run_plan`` runs a given plan under a given plan label; the
 non-interference tests use it to quantify over plans directly.
 
-A run is: check, resolve, decide, then execute only if every action is ALLOWed.
-Phase 1 has no approval-execution path, so NEEDS_APPROVAL produces an approval
-request and executes nothing (the denying approver).
+A run is: recover, check, resolve, decide, then execute only if every action
+is ALLOWed. Phase 1 has no approval-execution path, so NEEDS_APPROVAL produces
+an approval request and executes nothing (the denying approver). Every run
+writes one append-only audit row (``audit`` table) explaining its decision.
 """
 
 import hashlib
+import json
 import sqlite3
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Protocol
 
 from .approval import canonical_set, digest
 from .declassify import RuleDecision
-from .execution import Executed, PaymentProvider, execute
+from .execution import Executed, PaymentProvider, execute, recover
 from .interpreter import Interpreter, ResolvedAction
-from .labels import Label, join
+from .labels import STAR, Label, join
 from .plan_lang import PlanRejected, check_plan, parse_plan
 from .policy import Verdict, decide
 from .tools.database import Database, lossless_text
@@ -56,10 +59,69 @@ class RunResult:
     planner_input_hash: str | None = None
 
 
+def _origins(label: Label) -> list[str] | str:
+    return STAR if STAR in label.untrusted else sorted(label.untrusted)
+
+
+def _audit(db: sqlite3.Connection, r: RunResult, raw_plan: Any, task_id: str | None) -> RunResult:
+    record = {
+        "task_id": task_id,
+        "outcome": r.outcome,
+        "reason": r.reason,
+        "planner_input_hash": r.planner_input_hash,
+        "plan_label": _origins(r.plan_label),
+        "plan": raw_plan,
+        "actions": [
+            {
+                "site": list(a.site),
+                "tool": a.tool,
+                "args": a.canonical_args(),
+                "labels": {n: _origins(lbl) for n, lbl in a.component_labels().items()},
+            }
+            for a in r.actions
+        ],
+        "verdicts": [{"kind": v.kind, "reason": v.reason, "rule": v.rule} for v in r.verdicts],
+        "rules": [
+            {"rule": d.rule, "site": list(d.site), "admitted": d.admitted, "reason": d.reason}
+            for d in r.rule_log
+        ],
+        "approval_request": r.approval_request,
+        "approval_hash": r.approval_hash,
+        "executed": [
+            {
+                "site": list(x.site),
+                "tool": x.tool,
+                "key": x.idempotency_key,
+                "provider_ref": x.provider_ref,
+            }
+            for x in r.executed
+        ],
+    }
+    text = json.dumps(record, sort_keys=True, ensure_ascii=False, default=repr)
+    db.execute("INSERT INTO audit (run_id, record) VALUES (?, ?)", (r.run_id, text))
+    db.commit()
+    return r
+
+
 def run_plan(
-    raw_plan: Any, env: Environment, *, run_id: str, plan_label: Label = OPERATOR
+    raw_plan: Any,
+    env: Environment,
+    *,
+    run_id: str,
+    plan_label: Label = OPERATOR,
+    task_id: str | None = None,
+    planner_input_hash: str | None = None,
 ) -> RunResult:
     env.db.text_factory = lossless_text
+    recover(env.db, env.provider)
+    result = _decide_and_execute(raw_plan, env, run_id, plan_label)
+    result = replace(result, planner_input_hash=planner_input_hash)
+    return _audit(env.db, result, raw_plan, task_id)
+
+
+def _decide_and_execute(
+    raw_plan: Any, env: Environment, run_id: str, plan_label: Label
+) -> RunResult:
     try:
         plan = parse_plan(raw_plan)
         check_plan(plan)
@@ -121,15 +183,19 @@ def run_task(
     env: Environment,
     *,
     leak_ticket_bodies: tuple[int, ...] = (),
+    run_id: str | None = None,
 ) -> RunResult:
-    """Plan once and run.
+    """Plan once and run. ``run_id`` defaults to a fresh random UUID (DESIGN §7);
+    evaluation passes one derived from its seed, for reproducibility.
 
     ``leak_ticket_bodies`` simulates broken planner isolation (the leaked-context
     configuration): those ticket bodies are shown to the planner, and the plan
     label, which literals and the root pc inherit, becomes as untrusted as they are.
     """
+    run_id = run_id or str(uuid.uuid4())
     if task_id in env.planned_tasks:
-        return RunResult(task_id, "rejected", "task already planned; re-planning is forbidden")
+        refused = RunResult(run_id, "rejected", "task already planned; re-planning is forbidden")
+        return _audit(env.db, refused, None, task_id)
     env.planned_tasks.add(task_id)
     env.db.text_factory = lossless_text
     context: list[tuple[str, Label]] = []
@@ -140,7 +206,11 @@ def run_task(
             assert isinstance(body, Scalar)
             context.append((str(body.value), body.label))
     planner_input = PlannerInput(request, signatures(), tuple(context))
-    result = run_plan(
-        planner.plan(planner_input), env, run_id=task_id, plan_label=planner_input.label()
+    return run_plan(
+        planner.plan(planner_input),
+        env,
+        run_id=run_id,
+        plan_label=planner_input.label(),
+        task_id=task_id,
+        planner_input_hash=planner_input.digest(),
     )
-    return replace(result, planner_input_hash=planner_input.digest())

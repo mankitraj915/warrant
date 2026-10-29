@@ -11,8 +11,9 @@ refunded for every policy read, so a provider failure can never leave money
 moved without a record (Gate 1 review #2). If the call raises, the provider is
 asked for the key's status: a committed refund is recorded and the run goes on;
 otherwise the pending row is removed (or kept, if the status is unknown) and
-the run stops as aborted or partial. Full intent records, recovery and the
-crash-injection test are Phase 2.
+the run stops as aborted or partial. ``recover`` reconciles rows a crash left
+pending, by provider status, at the start of every run
+(tests/test_execution_recovery.py injects the crash).
 """
 
 import sqlite3
@@ -52,6 +53,27 @@ class _Unknown:
 
 
 UNKNOWN = _Unknown()
+
+
+def recover(db: sqlite3.Connection, provider: PaymentProvider) -> None:
+    """Reconcile refund rows left ``pending`` by a crash, before any decision.
+
+    Committed at the provider → record its reference; known not to have happened →
+    delete the row; provider unreachable → leave it pending (it still counts as
+    refunded, so nothing can pay the order twice)."""
+    pending = db.execute(
+        "SELECT idempotency_key FROM refunds WHERE provider_ref = ?", (PENDING,)
+    ).fetchall()
+    for (key,) in pending:
+        try:
+            ref = provider.status(key)
+        except Exception:
+            continue
+        if ref is None:
+            db.execute("DELETE FROM refunds WHERE idempotency_key = ?", (key,))
+        else:
+            db.execute("UPDATE refunds SET provider_ref = ? WHERE idempotency_key = ?", (ref, key))
+    db.commit()
 
 
 def execute(
