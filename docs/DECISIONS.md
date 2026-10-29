@@ -762,5 +762,6 @@ logged to `results/fuzz_chunks.jsonl`. 1,000 examples was sized from the first c
 | `test_noninterference` | 202610300–202610319 | 20,000 | 0 | 708 | 91.9 MB | 270 s |
 | `test_noninterference_multirun` | 202610400–202610419 | 20,000 | 0 | 2,293 | 90.6 MB | 216 s |
 
-Zero counterexamples. The multi-run property's invalid rate (about 11%) comes from
-Hypothesis rejecting oversized draws; recorded, not tuned.
+Zero counterexamples. The multi-run property's invalid rate is about 11% (single-run about
+3.5%). Neither property calls `assume` or filters, so these are most likely draws Hypothesis
+abandoned for exceeding its size limit; that cause is not verified. Recorded, not tuned.
