@@ -46,6 +46,13 @@ CREATE TABLE refunds (
     provider_ref TEXT NOT NULL
 );
 
+-- Approval requests: one per run that needs approval; consumed before execution.
+CREATE TABLE approvals (
+    run_id TEXT PRIMARY KEY,
+    hash TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('requested', 'consumed'))
+);
+
 -- Kernel decision log: one row per run, append-only (enforced by triggers).
 CREATE TABLE audit (
     id INTEGER PRIMARY KEY,

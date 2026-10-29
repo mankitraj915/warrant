@@ -6,9 +6,11 @@ the plan. ``run_plan`` runs a given plan under a given plan label; the
 non-interference tests use it to quantify over plans directly.
 
 A run is: recover, check, resolve, decide, then execute only if every action
-is ALLOWed. Phase 1 has no approval-execution path, so NEEDS_APPROVAL produces
-an approval request and executes nothing (the denying approver). Every run
-writes one append-only audit row (``audit`` table) explaining its decision.
+is ALLOWed or the whole set is approved. NEEDS_APPROVAL produces an approval
+request (the canonical set and its hash) for ``env.approver``; an approval is
+honoured only for this run, for the hash the kernel recomputes, and once
+(DESIGN §7, NI-5). The default approver denies. Run ids are single-use. Every
+run writes one append-only audit row (``audit`` table) explaining its decision.
 """
 
 import hashlib
@@ -19,7 +21,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Protocol
 
-from .approval import canonical_set, digest
+from .approval import Approval, Approver, DenyAll, canonical_set, digest
 from .declassify import RuleDecision
 from .execution import Executed, PaymentProvider, execute, recover
 from .interpreter import Interpreter, ResolvedAction
@@ -32,7 +34,14 @@ from .values import Record, Scalar
 
 OPERATOR = Label.trusted_source("operator")
 Outcome = Literal[
-    "executed", "blocked", "needs_approval", "rejected", "aborted", "partial", "indeterminate"
+    "executed",
+    "blocked",
+    "needs_approval",
+    "approval_invalid",
+    "rejected",
+    "aborted",
+    "partial",
+    "indeterminate",
 ]
 
 
@@ -42,6 +51,7 @@ class Environment:
     provider: PaymentProvider
     extractor: Callable[[str], list[object]]
     planned_tasks: set[str] = field(default_factory=set)
+    approver: Approver = field(default_factory=DenyAll)
 
 
 @dataclass(frozen=True)
@@ -57,6 +67,7 @@ class RunResult:
     executed: tuple[Executed, ...] = ()
     plan_label: Label = OPERATOR
     planner_input_hash: str | None = None
+    approved: bool = False
 
 
 def _origins(label: Label) -> list[str] | str:
@@ -87,6 +98,7 @@ def _audit(db: sqlite3.Connection, r: RunResult, raw_plan: Any, task_id: str | N
         ],
         "approval_request": r.approval_request,
         "approval_hash": r.approval_hash,
+        "approved": r.approved,
         "executed": [
             {
                 "site": list(x.site),
@@ -114,7 +126,10 @@ def run_plan(
 ) -> RunResult:
     env.db.text_factory = lossless_text
     recover(env.db, env.provider)
-    result = _decide_and_execute(raw_plan, env, run_id, plan_label)
+    if env.db.execute("SELECT 1 FROM audit WHERE run_id = ?", (run_id,)).fetchone():
+        result = RunResult(run_id, "rejected", "run_id already used; run ids are single-use")
+    else:
+        result = _decide_and_execute(raw_plan, env, run_id, plan_label)
     result = replace(result, planner_input_hash=planner_input_hash)
     return _audit(env.db, result, raw_plan, task_id)
 
@@ -145,15 +160,40 @@ def _decide_and_execute(
         return replace(result, outcome="blocked", reason="; ".join(blocked))
     if any(v.kind == "NEEDS_APPROVAL" for v in verdicts):
         request = canonical_set(run_id, actions, verdicts)
-        return replace(
-            result,
-            outcome="needs_approval",
-            reason="approval required; no approver in Phase 1 (denied)",
-            approval_request=request,
-            approval_hash=digest(request),
+        hash_ = digest(request)
+        result = replace(result, approval_request=request, approval_hash=hash_)
+        env.db.execute(
+            "INSERT INTO approvals (run_id, hash, status) VALUES (?, ?, 'requested')",
+            (run_id, hash_),
         )
+        env.db.commit()
+        approval = env.approver.review(request, hash_)
+        if approval is None:
+            return replace(result, outcome="needs_approval", reason="approval denied")
+        problem = _consume(
+            env.db, approval, run_id, digest(canonical_set(run_id, actions, verdicts))
+        )
+        if problem is not None:
+            return replace(result, outcome="approval_invalid", reason=problem)
+        result = replace(result, approved=True)
     outcome, done = execute(actions, verdicts, env.db, env.provider)
     return replace(result, outcome=outcome, reason=outcome, executed=tuple(done))
+
+
+def _consume(db: sqlite3.Connection, approval: Approval, run_id: str, hash_: str) -> str | None:
+    """Accept an approval only for this run, for the recomputed hash, once. The
+    approval is consumed (committed) before any provider call."""
+    if approval.run_id != run_id:
+        return "approval was issued for another run"
+    if approval.hash != hash_:
+        return "approval does not match the action set about to execute"
+    used = db.execute(
+        "UPDATE approvals SET status = 'consumed'"
+        " WHERE run_id = ? AND hash = ? AND status = 'requested'",
+        (run_id, hash_),
+    )
+    db.commit()
+    return None if used.rowcount == 1 else "approval already used"
 
 
 @dataclass(frozen=True)

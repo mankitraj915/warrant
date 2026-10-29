@@ -3,18 +3,39 @@
 The hashed object carries each argument's value and untrusted origins, the pc's
 origins and the verdict, so an approval view rendered from it shows exactly
 what is hashed. Verdict *reasons* are not hashed: they explain, they do not
-authorize (D-023). Phase 1 builds requests only; binding approvals to runs and
-executing approved sets is Phase 2.
+authorize (D-023).
+
+An ``Approval`` names a run and a hash. The kernel accepts it only for that run,
+only if the hash equals its own recomputation of the set it is about to
+execute, and only once (DESIGN §7, NI-5).
 """
 
 import hashlib
 import json
 from collections.abc import Sequence
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Protocol
 
 from .interpreter import ResolvedAction
 from .labels import STAR, Label
 from .policy import Verdict
+
+
+@dataclass(frozen=True)
+class Approval:
+    run_id: str
+    hash: str
+
+
+class Approver(Protocol):
+    def review(self, request: dict[str, Any], hash_: str) -> Approval | None: ...
+
+
+class DenyAll:
+    """The default approver: approves nothing (Phase 1 behaviour)."""
+
+    def review(self, request: dict[str, Any], hash_: str) -> Approval | None:
+        return None
 
 
 def _origins(label: Label) -> list[str] | str:
