@@ -23,6 +23,9 @@ UNTRUSTED_COLUMNS: dict[str, frozenset[str]] = {
 REFUND_WINDOW_DAYS = 30
 MAX_LIST = 100
 EXISTS = "@row"  # pseudo-column: the existence of a customer-creatable row
+# Extension point for the T08 hypothesis test (D-036); always True in use. False
+# drops the existence origin from point reads of a trusted ticket id.
+POINT_READ_EXISTENCE = True
 
 
 def lossless_text(raw: bytes) -> str:
@@ -117,7 +120,8 @@ class Database:
             (ticket_id.value,),
         ).fetchone()
         exists = Label.untrusted_cell("tickets", int(ticket_id.value), EXISTS)
-        structure = join(ticket_id.label, exists)
+        narrowed = not POINT_READ_EXISTENCE and ticket_id.label.trusted
+        structure = ticket_id.label if narrowed else join(ticket_id.label, exists)
         records: tuple[Value, ...] = ()
         if row is not None:
             names = ("id", "customer_id", "subject", "body", "status")

@@ -140,9 +140,9 @@ Its residual risk is the **within-allowed-set attack**: the injected text names 
 
 ### 4.7 Execution layer (thin)
 
-- Before calling the provider, write an intent record with a business idempotency key, e.g. `refund:{order_id}:{ticket_or_incident_id}`.
-- On recovery, query the provider's status before retrying.
-- Write one crash-injection test that kills execution between the provider call and recording its result, and checks there is exactly one refund.
+- Before calling the provider, write an intent record with a business idempotency key, e.g. `refund:{order_id}:{ticket_or_incident_id}`. Pending records count as refunded for every policy decision. **This step is in Phase 1** (amended at Gate 1, review finding 2): without it, a failure after the provider commits loses the record and a declassification rule can admit a second refund of the same order.
+- On recovery, query the provider's status before retrying. (Phase 1 reconciles a failed call by status immediately; recovery of pending records left by a crash is Phase 2.)
+- Write one crash-injection test that kills execution between the provider call and recording its result, and checks there is exactly one refund. (Phase 2.)
 
 Nothing more than this.
 
@@ -164,6 +164,8 @@ Everything external is simulated. Fault injection against a real provider would 
 
 For a plan `P` (random, adversarial, or oracle) and two environments `E1` and `E2` that are identical in all trusted data and differ only in untrusted content:
 
+- Rows of tables that customers can create (tickets) may also differ between `E1` and `E2`: the attacker can open a ticket, and ticket ids are predictable. Whether such a row exists is untrusted data (amended at Gate 1, review finding 1).
+
 1. Run `P` against `E1` and against `E2`, with the simulated approver *denying* every request.
 2. Compare:
    - **(a)** the multiset of consequential effects actually executed;
@@ -174,7 +176,8 @@ For a plan `P` (random, adversarial, or oracle) and two environments `E1` and `E
 
 Implementation notes:
 - Use Hypothesis strategies over the plan language and over untrusted-content mutations. Include adversarial generators that target known laundering patterns: selection by tainted condition, tainted list indices, amount arithmetic on tainted values, and nested `map`/`filter`.
-- Run with a fixed seed under `make check`. Run for a long time under `make fuzz`.
+- Run with a fixed seed under `uv run --locked python scripts/tasks.py check`. Run for a long time under `uv run --locked python scripts/tasks.py fuzz`, in bounded chunks with recorded seeds.
+- Include a multi-run property: a sequence of plans on one evolving environment, with provider failures injected and the attacker editing untrusted content and opening tickets between runs. Cross-run rule postconditions are checked there (amended at Gate 1, review finding 6).
 - Commit shrunk counterexamples as permanent regression tests.
 
 ## 6. Planners and baselines
@@ -248,7 +251,7 @@ Each phase ends when its definition of done is met *and verified by commands you
   - explicit out-of-scope items: timing and side channels, host compromise, a malicious operator, model-weight attacks.
 - Write `docs/DESIGN.md`: the label lattice, program-counter label semantics, the plan grammar, policy and declassification semantics, the re-planning decision, and the precise non-interference statement.
 
-**Done when:** `make check` runs (even with few tests) and both documents are complete.
+**Done when:** `uv run --locked python scripts/tasks.py check` runs (even with few tests) and both documents are complete.
 
 ⛔ **GATE 0.** Report using the template. Include the three hardest design decisions with the alternatives you rejected, and anything in this spec you believe is wrong.
 
@@ -319,7 +322,7 @@ Each phase ends when its definition of done is met *and verified by commands you
 ### Phase 5: Results and presentation
 
 **Build:**
-- `make report` regenerates `docs/RESULTS.md` from the results JSON.
+- `uv run --locked python scripts/tasks.py report` regenerates `docs/RESULTS.md` from the results JSON.
 - `README.md`:
   - the problem and threat model in brief;
   - the invariant;
@@ -329,7 +332,7 @@ Each phase ends when its definition of done is met *and verified by commands you
   - one annotated decision trace of an attack being blocked;
   - a Limitations section;
   - a prior-art section.
-- `make demo` shows:
+- `uv run --locked python scripts/tasks.py demo` shows:
   - an outage bulk refund resolved, approved by hash, and executed exactly as approved;
   - an injected ticket producing a blocked or approval-routed action, with the audit-log explanation.
 

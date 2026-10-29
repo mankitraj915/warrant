@@ -16,6 +16,7 @@ import kernel.declassify
 import kernel.execution
 import kernel.interpreter
 import kernel.policy
+import kernel.tools.database
 from kernel.labels import BOTTOM, Label
 from kernel.tools.database import TrustedReader
 from tests.ni_properties import NIViolation
@@ -65,6 +66,12 @@ MUTANTS: dict[str, tuple[Any, str, Any]] = {
     "at ignores index label": (kernel.interpreter, "at_structure_label", _at_ignores_index),
     "policy ignores pc": (kernel.policy, "PC_IS_A_COMPONENT", False),
     "ownership rule drops uniqueness": (kernel.declassify, "REQUIRE_UNIQUE_ELIGIBLE", False),
+    # Gate 1 decision 3: point reads of a trusted ticket id without the existence taint.
+    "point ticket read drops existence origin": (
+        kernel.tools.database,
+        "POINT_READ_EXISTENCE",
+        False,
+    ),
     # Added after the Gate 1 review (findings 2, 3 and 6).
     "ownership rule ignores origin set": (
         kernel.policy,

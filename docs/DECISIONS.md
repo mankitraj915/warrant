@@ -629,3 +629,51 @@ Revisit with Phase 2 intent ids.
   0 failing. Rule-admission coverage in the single-run property fell from 11.6% (0c25bff) to
   4.9% (5692a2b), because the new shapes dilute it and admissions now also need a
   never-refunded order.
+
+---
+
+## Gate 1 outcome (owner, 2026-10-30)
+
+1. **Fuzz re-run blocks Phase 2:** run the post-fix 20k examples per property as sequential
+   chunks with distinct recorded seeds, sized from measured peak RSS; record in D-024 and
+   correct the memory estimate.
+2. **F-1 accepted** as a documented residual risk of the ownership rule, still counted as
+   attack success in every metric. Phase 2 adds an auto-refund amount cap as a rule parameter
+   and reports a sweep (attack success, utility, approval burden, approval steering per cap)
+   before any default is chosen.
+3. **T08:** test whether point reads of an operator-supplied ticket id need the existence
+   taint (D-036).
+4. **Spec issues accepted:** SPEC §5 now uses `tasks.py`, states that ticket rows may differ
+   between worlds and requires the multi-run property; §4.7 moves record-before-provider into
+   Phase 1. The remaining `make report`/`make demo` mentions in SPEC were also switched to
+   `tasks.py`.
+
+## D-036 Point reads of a trusted ticket id keep the existence taint (T08 hypothesis rejected)
+
+**Hypothesis tested** (owner, Gate 1 decision 3): existence taint is needed for enumeration and
+selection reads, but for a point read of an operator-supplied ticket id existence can only
+suppress a run, which NI-3 already permits.
+
+**Result: it does not hold.** With the narrowed variant
+(`kernel.tools.database.POINT_READ_EXISTENCE = False`), the existence bit of a point read
+becomes a value (how many times a `map` body runs, `len`, an `at` index) that chooses *between*
+actions. Both runs execute, with different effects and no rule involved, so NI-3 itself
+fails, not only the stricter NI-1. `tests/test_point_read_existence.py`:
+- two point reads, a refund under each: opening 4001 vs 4002 executes (7000, 120000) vs
+  (7001, 450000);
+- `at(orders, len(read_ticket(4001)))`: not opening vs opening 4001 executes (7000, 120000) vs
+  (7001, 450000);
+- with the taint kept, both plans go to `needs_approval` in both worlds.
+The reviewer's original probe (one read gating one refund) is NI-3-permitted suppression
+under the narrowing, but NI-1 still flags it, and the fuzzer catches the narrowed variant as a
+mutant ("point ticket read drops existence origin", 600 derandomized examples).
+
+**Decision:** keep D-028 unchanged; T08's cost stands as measured (rule-decided; approval if
+the customer had two eligible orders). The extension point stays for the mutant.
+
+**Alternative noted, not adopted (it would change the design):** make a point read of a
+*trusted* id that finds no row fail the whole run (BLOCK) instead of returning an empty list.
+Existence would then reach only whole-run suppression, and the taint could be dropped for
+such reads, removing T08's cost. It reverses list-shaped absence (Phase 1 decision) for
+tickets and needs NI-1 restated to exempt runs halted during resolution. Candidate for Gate 2
+discussion, with T08-like tasks in the Phase 2 suite to measure what it buys.
