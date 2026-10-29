@@ -58,6 +58,8 @@ machine), run `uv run --locked python scripts/tasks.py <target>` instead.
 ## Current status
 
 Phase: 0 complete, waiting at GATE 0 for the owner's decision. Design in `docs/DESIGN.md`,
-threat model in `docs/THREAT_MODEL.md`, decisions D-001…D-013 and spec issues S-1…S-20 in
-`docs/DECISIONS.md`. No feature code yet: `kernel/` is an empty package. Next (Phase 1): write the
-NI fuzzer and invariant tests before labels/interpreter/policy.
+threat model in `docs/THREAT_MODEL.md`, decisions D-001…D-019 and spec issues S-1…S-20 in
+`docs/DECISIONS.md`, independent review and responses in `docs/reviews/GATE0_REVIEW.md`. No
+feature code yet: `kernel/` is an empty package. Next (Phase 1): write the NI fuzzer and invariant
+tests (NI-1…NI-5) before labels/interpreter/policy; install the network audit hook in eval/fuzz
+entry points too.

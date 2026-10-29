@@ -85,9 +85,10 @@ lower than the evaluation shows. The steering rate is reported to make that gap 
 - A malicious operator; also an operator who pastes untrusted text into their own request (that
   text is trusted by assumption; this is a documented limitation, not a defended path).
 - Attacks on model weights or the model download.
-- Availability: an attacker may be able to *prevent* an intended action (for example by making
-  the ticket ambiguous). Such suppression is measured as lost utility under attack, but not
-  prevented.
+- Availability: an attacker may be able to *prevent* intended actions, for example by making
+  a ticket ambiguous. Because the actions of one run are decided together, this can hold up
+  every action in that run, not only the one the attacker's text touches. Such suppression is
+  measured as lost utility under attack, but not prevented.
 - A planner that misreads the operator's intent with no attacker involved. That is a correctness
   problem of the planner, not a violation of the invariant.
 - Social engineering of the approver beyond what the steering metric captures.

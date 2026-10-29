@@ -271,3 +271,70 @@ owner may overrule.
 | S-18 | — | Persistence laundering (write tainted value, read back as trusted later) is not covered | Storage label rule (adopted, DESIGN §11) |
 | S-19 | 4.2 | "Values cannot be constructed without a label outside kernel/" is unenforceable against in-process Python code | Scope it by the threat model (attacker doesn't control code), plus private constructors (adopted, DESIGN §2) |
 | S-20 | repo | The file is `Claude.md`; on case-sensitive filesystems tools look for `CLAUDE.md` | Rename with `git mv`. **Owner decision requested** (not done) |
+
+---
+
+## Gate 0 independent review: responses (2026-10-29)
+
+The verbatim findings and a point-by-point response are in `docs/reviews/GATE0_REVIEW.md`. The
+decisions it changed:
+
+## D-014 Keep atomic decisions; restate NI-3 to admit whole-run suppression only
+
+The reviewer showed that, as first written, NI-3 was false for the design's own atomic
+semantics. A tainted, literal-argument action in a `map` can make a fully trusted refund in the
+same run not execute, with no rule involved (finding 1).
+
+**Decision.**
+- Keep atomicity (D-005): one plan is one intent.
+- Restate NI-3: with equal release projections, each side's effects are either empty or one
+  common sequence.
+- Name whole-run suppression in THREAT_MODEL §6, and run one plan per ticket to bound it.
+
+**Rejected:**
+- *Partial execution.* It makes the original NI-3 true, but executes subsets of an intent.
+- *Weakening NI-3 ad hoc once the fuzzer found it.* That is exactly what the reviewer predicted
+  would happen.
+
+**Owner decision requested:** atomic vs partial is a direction choice.
+
+## D-015 NI-3 conditions on per-rule release projections, not on full decisions
+
+Finding 2: with the admitted action inside `D`, NI-3 became vacuous exactly when a rule leaked
+more than it claimed.
+
+**Decision.** Each rule declares `π_R`. For the ownership rule at `θ = 0` it is
+`(rule, site, outcome)`.
+
+## D-016 Cross-run state is part of the security argument
+
+Findings 3, 4 and 7:
+- "Once per ticket" now consults the persistent refunds record.
+- The storage rule counts row keys and `pc`, makes approval the warrant for an approved
+  action's writes (shown to the approver), and stores origins for agent-written untrusted
+  cells. `tickets.subject/body` are customer-channel-only.
+- Ticket row existence is customer-controlled: enumerations carry an existence origin, `~`
+  varies ticket rows, and NI-4 runs over sequences of runs.
+
+## D-017 Enforce rather than assume: planner invocation, extractor contract, policy reads
+
+Findings 5, 8 and 11:
+- The kernel invokes the planner itself, once per task id.
+- The extractor is stateless per call, bounded in tokens, and its output is validated with
+  exact types.
+- Policies read through a trusted-columns-only API, and set constraints are monotone.
+
+## D-018 Approval object includes labels, pc and reasons; NI-5 covers approval
+
+Finding 9: the hashed object now carries per-component origins, `pc` and verdict reasons;
+strings are normalised at resolution; and consumption is written before the first provider call.
+
+## D-019 Smaller fixes adopted
+
+- Per-action re-check before execution, with reported partial runs (finding 10).
+- Restated label-determinism lemma; selection labels cover every SQL clause; `ORDER BY` a
+  trusted key (finding 12).
+- Saturating bounded numerics, lossless decoding of untrusted text (finding 13).
+- Principal-scoped `customer:C` sinks (finding 14).
+- Network guard via audit hook, and broader static plus runtime import-boundary checks
+  (findings 15 and 16; code fixed, regression tests failed on the old code first).

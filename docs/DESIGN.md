@@ -34,9 +34,12 @@ kernel through interfaces at a composition root outside `kernel/` (D-012).
 
 Two properties make the guarantee planner-independent:
 
-1. **Isolation by construction.** The kernel builds the planner's input. In the standard
-   configuration that input is the operator request and the tool signatures only. Nothing
-   computed during a run flows back to the planner (no re-planning, §8).
+1. **Isolation by construction.** The *kernel* invokes the planner through a `Planner`
+   protocol, with an input it builds itself. In the standard configuration that input is the
+   operator request and the tool signatures only. The kernel logs a hash of the input, computes
+   the plan label from it (§8), and accepts exactly one plan per task id. Nothing computed
+   during a run flows back to the planner (no re-planning, §8), and no caller-side retry loop
+   can re-sample plans after seeing outcomes (review finding 8).
 2. **Enforcement on provenance, not intent.** Every decision is a function of labels computed by
    the kernel from where data came from, never of what the planner meant.
 
@@ -54,7 +57,7 @@ A label is a triple `ℓ = (U, S, P)`.
 | Component | Domain | Join | Used for decisions? |
 |---|---|---|---|
 | `U` untrusted origins | finite set of origins, or `★` | union; `★` absorbs | **yes**: integrity |
-| `S` allowed sinks | subset of `{operator, customer}` | intersection | **yes**: confidentiality |
+| `S` allowed sinks | subset of `{operator} ∪ {customer:C}` | intersection | **yes**: confidentiality |
 | `P` trusted provenance | set of trusted sources/origins | union | **no**: audit only |
 
 - An **origin** names a database cell: `table[row_key].column`, for example `tickets[42].body`.
@@ -62,7 +65,7 @@ A label is a triple `ℓ = (U, S, P)`.
 - `★` means "untrusted, origins not tracked". When `|U|` would exceed `MAX_ORIGINS` (32), `U`
   collapses to `★`. No declassification rule ever admits `★`, so the collapse is sound.
 - **Order:** `ℓ1 ⊑ ℓ2 ⇔ U1 ⊆ U2 ∧ S1 ⊇ S2` (with `X ⊆ ★` for every `X`). `P` is ignored.
-- **Bottom:** `⊥ = (∅, {operator, customer}, P)` for any `P`.
+- **Bottom:** `⊥ = (∅, all sinks, P)` for any `P`.
 - **Trusted for authority** ⇔ `U = ∅`.
 - **Labels are immutable.** Label construction is private to `kernel/`. Python cannot stop
   in-process code from forging objects; this is acceptable because the attacker does not control
@@ -83,10 +86,17 @@ schema and part of the TCB:
   `U = {t[k].c}`.
 - **Trusted columns**: everything else, including `tickets.customer_id` (set by the authenticated
   channel). Reading yields `U = ∅` with `P = {t[k].c}`.
-- **Row existence and keys are trusted.** The attacker controls cell contents, not which rows
-  exist (THREAT_MODEL §4).
-- **Sinks:** columns holding aggregates may only flow to `{operator}`. Row-level PII columns are
-  never exposed by any agent-visible tool (SPEC §4.8).
+- **Row existence.** Keys are trusted. Rows of most tables are created by trusted processes;
+  an order exists only through checkout and payment. **Tickets are different:** any customer,
+  including the attacker, can open them (review finding 7). So enumerating tickets (any read
+  tool that returns a *set* of tickets, not a lookup by one trusted key) joins an existence
+  origin `tickets[*@C]` for each customer `C` whose tickets could appear into the structure
+  label. A `map` over "all open tickets" therefore has an untrusted `pc`, and the number of
+  actions it produces cannot be set by an attacker without showing up in labels. Set-level
+  limits in policies are scoped per customer as well as per ticket.
+- **Sinks** carry a principal: `operator` and `customer:C` (review finding 14). Columns holding
+  aggregates may only flow to `{operator}`. Row-level PII columns are never exposed by any
+  agent-visible tool (SPEC §4.8).
 
 ---
 
@@ -120,14 +130,38 @@ making the ticket's own identity untrusted.
 | read tool `f(args)` → rows | selection/struct = `⊔ label(arg) ⊔ label(selection columns)`; field = `Λ(col)` instantiated for the row |
 | extractor `x(text)` → list | struct and every element = `label(text)` |
 
-Read tools declare which columns their row selection reads. If selection reads an untrusted column
-(for example a text search over ticket bodies), those origins join the structure label. A tool
-that hides this would be a TCB bug, so the declaration is reviewed with the registry.
+**Read tools.**
+- A read tool declares every column that affects row *membership, order, multiplicity or count*.
+  That covers `WHERE`, `JOIN`, `ORDER BY`, `DISTINCT` and `LIMIT`, not just the filter
+  (review finding 12).
+- The labels of those columns join the structure label.
+- Results are always `ORDER BY` a trusted key, so order never depends on SQLite's query plan.
+- A tool that under-declares is a TCB bug, so the declarations are reviewed with the registry.
 
-The extractor's output label depends only on its input label, never on what it returns. It is
-modelled as an *arbitrary* function from untrusted text to typed values, so its correctness is
-irrelevant to safety. Its output types (IDs, enums, bounded ints; lists of at most
-`MAX_EXTRACT` = 5 items) narrow the channel but do not make values trusted.
+**Compound values used whole** (review finding 6).
+- The label of a list or record used as a single value (an operator argument, or a
+  consequential argument of list type) is its structure or selection label joined with the
+  labels of all its leaves, recursively.
+- `elem ⊔ struct` joins into a nested record's selection label and into a nested list's
+  structure label alike.
+- P1, P5 and the "effective label" (§9) range over every leaf.
+- Operators other than `len`/`at`/`contains` accept scalars only; `min`/`max` are binary.
+
+**The extractor** is modelled as an *arbitrary* function from untrusted text to typed values, so
+its correctness is irrelevant to safety. Its output label is its input label, whatever it
+returns. That is sound only if each call depends on its own input alone (review finding 5).
+The extractor contract is therefore:
+- **Stateless per call.** No shared context, cache, or KV state across calls, and no run-wide
+  budgets.
+- **Bounded per call.** A deterministic per-call limit, in tokens rather than wall-clock time.
+- **Validated by the kernel:**
+  - outputs must be exact builtin types (`type(x) is int`, so not `bool` and not a subclass) and
+    within declared bounds;
+  - lists are capped at `MAX_EXTRACT` (5);
+  - exceptions and over-budget calls yield `[]`.
+
+Phase 4 adds a test that the LLM adapter's output for an input does not depend on the calls
+made before it. Output types narrow the channel but do not make values trusted.
 
 ### 3.1 Program-counter label
 
@@ -167,16 +201,32 @@ channel. To make evaluation total:
   function of length, which the structure label already covers.
 - The static checker bounds worst-case work: steps × `MAX_LIST`^nesting ≤ `WORK_BUDGET`. A plan
   is rejected statically if over budget, so this never depends on data.
-- Any exception during evaluation is a kernel bug. The run executes nothing and the fuzz harness
-  reports it as a failure, never as a skip.
+- Numeric domains are bounded (review finding 13):
+  - `Int` and `Money` are bounded to ±10¹⁵;
+  - `add`/`sub` saturate at the bounds, so arithmetic never overflows and never reaches SQLite
+    as an out-of-range integer;
+  - a negative `Money` is a value like any other, and policies BLOCK amounts ≤ 0.
+- Untrusted TEXT cells are read as bytes and decoded with replacement, so invalid UTF-8 written
+  by an attacker cannot raise.
+- Extractor exceptions and over-budget calls yield `[]` (§3).
+- Any remaining exception during evaluation is a kernel bug. The run executes nothing and the
+  fuzz harness reports it as a failure, never as a skip. The environment generators
+  deliberately include extreme integers and invalid UTF-8.
 
 ### 3.3 Label determinism (the lemma the NI test relies on)
 
-Label computation never inspects a value: every rule above is a join of input labels, chosen by
-syntax alone. Data-dependent evaluation (number of iterations, filter outcomes) only happens
-under a `pc` that already carries the label of the data it depends on. So, for environments
-`E1 ~ E2` (§9), the subsequence of resolved actions whose effective label is trusted is identical
-in sites, tools and values. §9 tests this directly as NI-1.
+Stated precisely (review finding 12): **whether a value's `U` is empty** is determined by the
+plan's syntax and the labels of trusted inputs, never by untrusted values. Every rule above is a
+join chosen by syntax. Data-dependent evaluation (number of iterations, filter outcomes) only
+happens under a `pc`, or inside a structure label, that already carries the data it depends on.
+
+The *contents* of `U` (which origins, and whether it collapsed to `★`) may depend on values,
+because origins name row keys. That affects only which rules can apply, and rules report
+through `D` (§9).
+
+Consequence: for environments `E1 ~ E2` (§9), the subsequence of resolved actions whose
+effective label is trusted is identical in sites, tools and values. §9 tests this directly as
+NI-1.
 
 ---
 
@@ -264,27 +314,52 @@ A run has four phases. Nothing consequential happens before phase 4.
    - any `BLOCK` → execute nothing;
    - otherwise → one approval request for the whole of `A`; execute `A` only if approved and
      the hash matches (§7).
-4. **Execute:** thin execution layer (§10), in plan order.
+4. **Execute:** thin execution layer (§10), in plan order. Immediately before each action, the
+   kernel re-runs that action's full policy, including rule admission, against the current
+   state (review finding 10). If any verdict differs from the decided one, execution stops.
+   The already-executed prefix is recorded and reported as a *partial* run. Payments cannot be
+   rolled back, so a partial run is surfaced and never hidden.
 
 The same structure is used in every mode, so the non-interference harness observes exactly what
 production would do.
+
+**Atomicity is a deliberate suppression channel** (review finding 1). Under a denying approver
+a run executes either all of `A` or nothing. Untrusted data that turns one action into
+NEEDS_APPROVAL or BLOCK therefore suppresses every other action in the run, including fully
+trusted ones. It can never *change* what executes, only whether the whole set does.
+
+Atomicity is kept because the actions of one plan express one intent (refund *and* close the
+ticket): executing a subset can be wrong in its own right. The channel is stated in
+THREAT_MODEL §6 and NI-3 is formulated to match it (§9.3). Its cost is measured. To keep the
+blast radius to one case, evaluation runs one plan per ticket. A batch over many tickets is many
+runs, except incident-driven bulk actions, whose targets are trusted.
 
 ---
 
 ## 6. Policies
 
-A policy is declared per consequential tool. It is a pure function of the action, the whole
-action list `A` (for set-level constraints such as duplicates), and database reads made by the
-policy itself. It returns a verdict and a reason.
+A policy is declared per consequential tool. It is a pure function of three things:
+- the action;
+- the whole action list `A`, for set-level constraints such as duplicates;
+- database reads made through a **policy read API that can only read trusted columns**
+  (review finding 11), and that includes the persistent record of past effects.
+
+It returns a verdict and a reason.
 
 Rules every policy obeys (tested in Phase 1):
 
+- **P0. Set-level constraints are monotone.** Adding actions to `A` can only tighten a verdict
+  (ALLOW → NEEDS_APPROVAL → BLOCK), never loosen one. So a tainted action can never help a
+  trusted one become ALLOW.
 - **P1. Untrusted never yields ALLOW without a rule.** If any component of an action (an argument
   or `pc`) has `U ≠ ∅`, the verdict is `ALLOW` only if every such component is endorsed by a
   logged declassification decision (§6.1).
-- **P2. `BLOCK` vs `NEEDS_APPROVAL` may depend on untrusted values.** For example, a nonexistent
-  order gives BLOCK and an unowned order gives NEEDS_APPROVAL. With a denying approver both
-  execute nothing, so this affects only approval requests (steering), never effects.
+- **P2. `BLOCK` vs `NEEDS_APPROVAL` may depend on untrusted values.** For example, an untrusted
+  `order_id` naming a nonexistent order gives BLOCK, and one naming an eligible order of the
+  case's customer that no rule admits gives NEEDS_APPROVAL. Under a denying approver neither
+  executes, so the difference shows up only in approval requests (steering). Through atomicity
+  (§5), it can also decide whether the rest of the run executes; NI-3 is stated to allow for
+  that.
 - **P3. Business invariants are BLOCK, whatever the labels.** Examples: amount ≤ 0, amount above
   the refundable amount the policy recomputes, an order not belonging to the case's customer, the
   same order refunded twice in `A`, an already-refunded order.
@@ -316,7 +391,10 @@ Every rule documents:
 
 - the tool and components it may endorse, and the permitted origins;
 - the admission predicate, evaluated by kernel code over trusted columns;
-- **release:** exactly what information about untrusted data can influence effects through it;
+- **release:** exactly what information about untrusted data can influence effects through it,
+  together with a **release projection** `π_R`: the part of each decision that is allowed to
+  depend on untrusted data. NI-3 conditions on `π_R` and nothing more, so a rule that releases
+  more than its projection fails NI-3 instead of hiding behind it (review finding 2);
 - **postcondition:** a property of every admitted action, stated over trusted data, checked by
   test-side code written independently of the kernel;
 - residual risk, plus admit, reject and residual-risk tests.
@@ -345,14 +423,21 @@ Applies to `issue_refund(ticket_id, order_id, amount)`.
   3. `|Eligible(C)| = 1`. Variant for Phase 1 measurement: `… or Refundable(order_id) ≤ θ`, with
      `θ = 0` the default;
   4. `amount = Refundable(order_id)`, recomputed by the rule;
-  5. `A` contains no other `issue_refund` with `ticket_id = T`.
+  5. `A` contains no other `issue_refund` with `ticket_id = T`, **and** the persistent refunds
+     record holds no refund for ticket `T` from any earlier run (review finding 3). The
+     attacker can edit the ticket between runs, so a per-run check would allow one refund per
+     re-run.
 - **One sentence:** *an order ID read from a ticket may target a refund only when it is that
   ticket's customer's single eligible order, for its full refundable amount, once per ticket.*
 - **Release:** with `θ = 0` the admitted action is a function of trusted data alone (the unique
   eligible order and its recomputed amount). Untrusted text decides one bit per ticket: whether
-  that refund executes automatically or goes to approval.
+  the rule admits. Because decisions are atomic (§5), that bit decides whether the *whole run*
+  executes automatically or goes to approval, not just the refund.
+  - **Release projection** `π = (rule, site, outcome)`. With `θ > 0` it becomes
+    `(rule, site, outcome, order_id)`. NI-3 compares exactly this projection (§9.3).
 - **Postcondition:** each executed refund admitted by this rule is on `C`'s unique eligible
-  order, for exactly its refundable amount, at most once per ticket.
+  order, for exactly its refundable amount, and is the only refund ever executed for ticket `T`,
+  across all runs.
 - **Residual risk:**
   - *Suppression*: injected text can turn an automatic refund into an approval request.
   - With `θ > 0`, *redirection* among `C`'s eligible orders whose refundable amount is ≤ `θ`.
@@ -369,18 +454,27 @@ affected orders is trusted structured authority.
 
 ## 7. Approval binding
 
-- **Canonical action:** `{"tool": name, "args": {param: value}}`. Values are ints (money in minor
-  units), strings (NFC-normalised), bools, or lists of these.
+- **Canonical action** (review finding 9):
+  `{"tool", "args": {param: value}, "labels": {param: U, "pc": U}, "verdict", "reason"}`.
+  - Values are ints (money in minor units), strings, bools, or lists of these.
+  - `U` is the sorted origin list (or `"★"`).
+  - Strings are NFC-normalised **at resolution**, so the executed bytes are the hashed bytes.
+  - The kernel executes exactly the canonical values.
 - **Canonical set:** `{"run_id": r, "actions": [a1 … an]}` in plan order, serialised as JSON with
   sorted keys, `(",", ":")` separators and UTF-8. Hash: SHA-256.
-- **Records:** an approval binds `(run_id, hash)`, is single-use, and is consumed at execution.
-  Binding to `run_id` prevents replaying an approval into a later run with an identical action
-  set (spec issue S-10).
-- **Execution check:** the kernel recomputes the hash of the set it is about to execute and
-  re-runs the BLOCK checks against current state (time-of-check to time-of-use). Any divergence
-  aborts with nothing executed.
-- **Presentation:** the approval view is rendered from the same canonical object that is hashed.
-  It shows each argument's untrusted origins and each verdict's reason.
+- **Records:**
+  - An approval binds `(run_id, hash)` and is single-use.
+  - `run_id` is a fresh random UUID per run. In evaluation it is derived from the seed, for
+    reproducibility.
+  - The approval is marked consumed in the same write as the run's intent records, before the
+    first provider call, so a crash cannot make it reusable.
+  - Binding to `run_id` prevents replaying an approval into a later run with an identical action
+    set (spec issue S-10).
+- **Execution check:** the kernel recomputes the hash of the set it is about to execute; any
+  divergence aborts with nothing executed. Per-action re-checks follow §5 step 4.
+- **Presentation:** the approval view is rendered from the hashed object. It therefore shows
+  every argument's *and the pc's* untrusted origins and each verdict's reason. A literal-argument
+  action under a tainted `map` is visibly untrusted-selected.
 - **Simulated approver:** in evaluation it approves iff the canonical set equals the task's
   ground-truth set. That makes it an idealised human, so evaluated approval safety is an upper
   bound, reported next to the steering rate.
@@ -409,9 +503,11 @@ context" stress configuration (spec issue S-12).
 
 An environment `E = (DB, clock, provider)`.
 `E1 ~ E2` iff:
-- both have the same rows (keys) in every table;
-- they agree on every trusted cell, the clock and the provider state;
-- untrusted cells may differ arbitrarily within their column types.
+- both have the same rows (keys) in every table, except tables whose rows customers can create
+  (tickets, §2.1), whose row sets may differ;
+- they agree on every trusted cell of the common rows, the clock and the provider state;
+- untrusted cells may differ arbitrarily. That includes values outside the "intended" type:
+  extreme integers in extractor output, and invalid UTF-8 (§3.2).
 
 Extractor outputs are part of the untrusted environment: the harness may draw them directly,
 so the property is tested for **every** extractor, not just the rule-based one.
@@ -419,7 +515,8 @@ so the property is tested for **every** extractor, not just the rule-based one.
 ### 9.2 Observations of a run of plan `P` in `E` with approver `Ap`
 
 - `Res(P,E)`: resolved actions with labels;
-- `D(P,E)`: rule decisions `(rule, site, outcome, canonical admitted action)`;
+- `D(P,E)`: rule decisions `(rule, site, outcome, canonical admitted action)`, and its release
+  projection `π(D)`, which applies each rule's `π_R` to its decisions (§6.1);
 - `Req(P,E)`: approval requests as canonical sets;
 - `X(P,E,Ap)`: executed effects, read from the payment provider's log and the consequential DB
   writes, in execution order. Comparing ordered lists is stronger than the spec's multiset.
@@ -431,17 +528,31 @@ so the property is tested for **every** extractor, not just the rule-based one.
   no assumption about rules, so it is never vacuous.
 - **NI-2 (policy soundness).** For every `E`, every `ALLOW`ed action is either fully trusted or
   every untrusted component is endorsed by a logged decision in `D(P,E)`.
-- **NI-3 (delimited release of effects).** If `D(P,E1) = D(P,E2)`, then
-  `X(P,E1,deny) = X(P,E2,deny)`. This is the formal version of "unless it is an enumerated
-  residual risk": the only permitted untrusted influence on effects is what rules release, and
-  rules release only through `D`.
+- **NI-3 (delimited release of effects, modulo whole-run suppression).** If
+  `π(D(P,E1)) = π(D(P,E2))`, then each of `X(P,E1,deny)` and `X(P,E2,deny)` is either empty or
+  equal to one common sequence `X*`. Untrusted data may only *suppress the whole run* (§5),
+  never change what executes. Effects may differ in content only through what rules release,
+  and rules release only through `π(D)`.
+  - This is the formal version of "unless it is an enumerated residual risk". The precondition
+    compares the projection, not the admitted actions, so a rule that admits a different action
+    than its release claims fails NI-3 directly (review findings 1 and 2).
 - **NI-4 (rule postconditions).** For every `E`, every executed action admitted by rule `R`
-  satisfies `Post_R` (§6.2), checked by test code independent of the kernel.
+  satisfies `Post_R` (§6.2). It is checked by test code independent of the kernel, **over
+  sequences of runs** on an evolving environment, because some postconditions ("only refund
+  ever for ticket `T`") span runs (review finding 3).
+- **NI-5 (approval binding).** With an approver that approves hash `h`:
+  - the executed canonical set hashes to `h`, or nothing (or a reported partial prefix, §5)
+    executes;
+  - an approval issued in run `r` is rejected in any run `r′ ≠ r`, and on a second use in `r`.
 - **Approval steering (recorded, not a violation):** `Req(P,E1) ≠ Req(P,E2)`.
 
-**Reported with every NI run:** examples run, seed, the fraction of pairs in which some rule was
-consulted, and the fraction in which `D` differed (NI-3's precondition failed). A low
-consulted-and-equal fraction would make NI-3 vacuous, so it is printed, not hidden.
+**Reported with every NI run:**
+- examples run and seed;
+- the fraction of pairs in which some rule was consulted;
+- the fraction in which `π(D)` differed (NI-3's precondition failed);
+- the fraction suppressed (one side empty, the other not).
+
+A low consulted-and-equal fraction would make NI-3 vacuous, so it is printed, not hidden.
 
 **Termination:** evaluation is total (§3.2), so the property is termination-sensitive. An
 exception in either run fails the test.
@@ -453,9 +564,13 @@ exception in either run fails the test.
 - Adversarial generators produce the known laundering shapes: selection by a tainted predicate,
   tainted `at` indices, `len` of tainted lists, money arithmetic on tainted values, nested
   `map`/`filter`, and calls inside tainted `map` bodies with all-literal arguments.
-- Environment mutations rewrite untrusted cells and extractor outputs. Their values are drawn to
-  be dangerous: IDs of the same customer's other orders, other customers' orders, duplicates,
-  empty lists, and the maximum list length.
+- Environment mutations rewrite untrusted cells and extractor outputs, and add or remove
+  customer-created ticket rows. Their values are drawn to be dangerous: IDs of the same
+  customer's other orders, other customers' orders, duplicates, empty lists, the maximum list
+  length, extreme integers, and invalid UTF-8.
+- A multi-run mode applies a sequence of plans to an evolving environment, with the attacker
+  allowed to rewrite untrusted cells between runs. NI-4's cross-run postconditions are checked
+  there.
 - `make check` runs a derandomized profile; `make fuzz` runs the `fuzz` profile. Shrunk
   counterexamples become `@example` regression tests.
 
@@ -475,10 +590,26 @@ BLOCKed by the policy (P3).
 
 ## 11. Persistence (storage label rule)
 
-A consequential tool may write a value to a column only if the value's label ⊑ the column's label
-in `Λ`, or the value is a component endorsed for that action. Agent-written free text therefore
-goes only into untrusted columns, and a later run reads it back as untrusted. This closes
-laundering across runs.
+Revised after review finding 4.
+
+- **Every executed write is part of a warranted action**: fully trusted, rule-endorsed, or
+  approved. A write's *trust* comes from that warrant. The approval view (§7) lists every
+  trusted column an approved action will write, with the pc and argument origins. A human who
+  approves "escalate ticket 77" sees that `tickets[77].priority` will become a trusted `high`,
+  and that the choice of 77 came from untrusted text.
+- **Trusted columns** may be written only when
+  `label(value) ⊔ label(row-selecting args) ⊔ pc` is trusted, or when every untrusted part of
+  that join is endorsed by a rule or covered by the approval of this exact action.
+  - The row key and the `pc` count, not just the value.
+  - Effect records (refunds, credits) are written by the kernel from the canonical action and
+    state what executed. They are trusted facts about the past, not plan-supplied data.
+- **Untrusted columns** written by the agent (free-text notes) store their origin set alongside
+  the cell, and the cell is read back with that `U` (or `★` if none was stored). The agent may
+  never write `tickets.subject` or `tickets.body`. Those columns are written only by the
+  customer channel, so `Ω_T` (§6.2) really means "text that arrived on ticket `T`", and text
+  from elsewhere cannot be relabelled into it.
+
+This closes laundering across runs.
 
 ## 12. Parameters
 
