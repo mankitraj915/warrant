@@ -355,7 +355,7 @@ Each phase ends when its definition of done is met *and verified by commands you
 These statements go verbatim into `docs/RESULTS.md`.
 
 - **May claim:**
-  - within the tested plan space, task suites, and policy set, executed unapproved effects were invariant to untrusted content;
+  - within the tested plan space, task suites, and policy set, executed unapproved effects were invariant to untrusted content, except through each named declassification rule's declared release projection; the non-interference test checks exactly this (NI-3 in `docs/DESIGN.md` §9.3), together with the accepted suppression channel of atomic decisions (untrusted content may prevent a whole run from executing, never change what executes);
   - the measured utility, approval burden, and approval-steering costs;
   - the comparison against baselines on these suites;
   - holdout results reported as a separate generalization check.

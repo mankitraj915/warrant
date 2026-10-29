@@ -168,3 +168,13 @@ after `718c66f`) and in `DECISIONS.md` D-014…D-019. Code fixes are in commit `
 | 14 | Low | **Accepted.** Sinks are `operator` and `customer:C`. | DESIGN §2, §2.1 |
 | 15 | Low | **Accepted and fixed; I verified it myself.** I added regression tests for `gethostbyname` and a C-level `_socket.connect_ex`. Both **failed on the old guard** (`2 failed, 4 passed`). The guard is now a `sys.addaudithook` covering connect, sendto, sendmsg and name resolution. The guard does not reach subprocesses, and installing it in the eval/fuzz entry points is a Phase 1 item; both are recorded. | `tests/conftest.py`, `tests/test_network_guard.py` |
 | 16 | Low | **Accepted and fixed; I verified it myself.** The reviewer's forms were added as test cases and **failed on the old scanner**. The static denylist is broadened, and a runtime check imports every kernel module in a fresh interpreter that refuses the forbidden packages. The probe was confirmed non-vacuous: forbidding `csv` and importing it gives `ImportError`. | `tests/test_import_boundary.py` |
+
+### Did I accept any finding mainly because the reviewer raised it? (added after Gate 0)
+
+Partly, yes. I would defend #1–#4 and #8 on their own, but four acceptances were partly deference:
+- **#14** (`customer:C` sinks) is correct, but nothing uses it until Phase 2, so on my own I would have deferred it.
+- **#16:** the static denylist is low-value, since kernel code isn't attacker-controlled. The runtime check is the useful half.
+- **#9:** origins and `pc` belong in the approval hash, but hashing verdict *reasons* adds nothing.
+- **#10:** I folded in "partial runs" without flagging that they weaken the atomic semantics I defended in #1. My actual position is to re-check before execution and abort the whole run on any divergence before the first effect. True partial runs then need a mid-execution state change, which cannot happen in Phase 1 because the kernel is the only writer.
+
+I also adopted #7's existence-origin mechanism faster than I had designed it; it is deferred to the first ticket-enumerating tool (D-021).

@@ -199,8 +199,8 @@ channel. To make evaluation total:
   or timeout.
 - Lists longer than `MAX_LIST` (100) are truncated, and the truncation is logged. Truncation is a
   function of length, which the structure label already covers.
-- The static checker bounds worst-case work: steps × `MAX_LIST`^nesting ≤ `WORK_BUDGET`. A plan
-  is rejected statically if over budget, so this never depends on data.
+- Worst-case work is bounded statically by `MAX_STEPS` × `MAX_LIST`^`MAX_DEPTH`
+  (64 × 100² = 6.4×10⁵ evaluations), so it never depends on data (D-022's plan note).
 - Numeric domains are bounded (review finding 13):
   - `Int` and `Money` are bounded to ±10¹⁵;
   - `add`/`sub` saturate at the bounds, so arithmetic never overflows and never reaches SQLite
@@ -266,7 +266,7 @@ Static checker rules (all checked before any execution):
 - **Consequential tools return `Unit`, and a `Unit` (or `List[Unit]`) can never be bound or
   referenced.** No later step can depend on a consequential result, which is what lets the
   kernel resolve the whole action set before executing anything (§5).
-- `map`/`filter` nesting depth ≤ `MAX_DEPTH` (2). Worst-case work ≤ `WORK_BUDGET` (§3.2).
+- `map`/`filter` nesting depth ≤ `MAX_DEPTH` (2), which bounds worst-case work (§3.2).
 
 The illustrative plan from SPEC §4.4 in this grammar, with `ticket_id` added to `issue_refund`
 (D-009). Absence is list-shaped, so the refund is a `map` over the extraction, which has at most
@@ -314,11 +314,12 @@ A run has four phases. Nothing consequential happens before phase 4.
    - any `BLOCK` → execute nothing;
    - otherwise → one approval request for the whole of `A`; execute `A` only if approved and
      the hash matches (§7).
-4. **Execute:** thin execution layer (§10), in plan order. Immediately before each action, the
-   kernel re-runs that action's full policy, including rule admission, against the current
-   state (review finding 10). If any verdict differs from the decided one, execution stops.
-   The already-executed prefix is recorded and reported as a *partial* run. Payments cannot be
-   rolled back, so a partial run is surfaced and never hidden.
+4. **Execute:** thin execution layer (§10), in plan order (D-022).
+   - Before the first effect, the kernel re-runs every action's full policy, including rule
+     admission, against current state. Any divergence aborts the run with nothing executed.
+   - Between effects, each action is re-checked again. A divergence there needs a writer other
+     than the kernel; if one occurs, the run stops and the executed prefix is reported as
+     *partial*. Payments cannot be rolled back, so a partial run is surfaced, never hidden.
 
 The same structure is used in every mode, so the non-interference harness observes exactly what
 production would do.
@@ -620,7 +621,6 @@ This closes laundering across runs.
 | `MAX_LIST` | 100 | runtime truncation, logged |
 | `MAX_EXTRACT` | 5 | extractor list length |
 | `MAX_ORIGINS` | 32 | collapse to `★` |
-| `WORK_BUDGET` | 10⁶ | static worst-case evaluation steps |
 | `θ` | 0 | ownership-rule ambiguity threshold (minor units) |
 
 All are provisional until Phase 1 measures them.

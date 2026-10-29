@@ -338,3 +338,96 @@ strings are normalised at resolution; and consumption is written before the firs
 - Principal-scoped `customer:C` sinks (finding 14).
 - Network guard via audit hook, and broader static plus runtime import-boundary checks
   (findings 15 and 16; code fixed, regression tests failed on the old code first).
+
+---
+
+## Gate 0 outcome (owner, 2026-10-29)
+
+Approved. Owner decisions:
+1. **Keep atomic decisions (D-014).** Suppression is an accepted availability cost, measured by
+   utility under attack.
+2. **SPEC §10 amended.** Invariance holds except through each named rule's declared release
+   projection, and NI-3 checks exactly that. RESULTS.md wording follows §10.
+3. **Leaked-context gullible is a separate configuration** that tests the plan-label layer
+   independently of planner isolation. It is reported separately from the main matrix.
+4. **`Claude.md` renamed to `CLAUDE.md`** (two-step `git mv`).
+5. **`uv run --locked python scripts/tasks.py <target>` is the canonical interface.** The Makefile
+   is a convenience alias, and make is not installed.
+
+## D-020 Memory available for the Phase 4 model
+
+Measured 2026-10-29T22:33 (local) with `Get-CimInstance Win32_OperatingSystem` and the
+`\Memory\Available MBytes` counter:
+- total 7.84 GB;
+- free 0.83 GB, available 892 MB;
+- "Memory Compression" at 1.37 GB, which indicates pressure.
+
+**This was not a closed-apps measurement.** Brave (25 processes, about 2.28 GB working set) and
+an IDE (about 0.26 GB) were open, and the process list was only observed, not changed. The owner
+should re-measure with apps closed and record the figure here.
+
+Planning assumption until then: a quantized model of about 1–1.5B parameters (Q4, roughly
+0.8–1.2 GB resident including the KV cache), as the owner expects. A larger model only if the
+closed-apps figure is materially above 0.7 GB.
+
+## D-021 Ticket-row existence (review #7) is deferred to the first ticket-enumerating tool
+
+Phase 1 reads tickets only by key (`read_ticket(ticket_id)`), and keyed lookups of a row the
+operator named are trusted. So in Phase 1 the environment relation `~` keeps row sets fixed. The
+existence-origin mechanism and row variation in `~` arrive with the first tool that enumerates
+tickets (Phase 2 at the earliest).
+
+## D-022 Pre-execution re-check aborts the whole run; true partial runs need concurrent writers
+
+This refines D-019 and review #10.
+- Policies (including rule admission) are re-run against current state for every action before
+  the first effect.
+- Any divergence aborts the run with nothing executed.
+- A per-action re-check also runs between effects. A divergence there can only come from a
+  writer other than the kernel, which does not exist in Phase 1. If it happens, the run stops
+  and is reported as partial.
+
+---
+
+## Phase 1 plan (2026-10-29)
+
+Question: can 1–2 general rules let realistic data-dependent tasks run without reopening attacks?
+
+**Steps** (commit after each, with check green):
+1. `domain/`: schema, deterministic seed generator (byte-identical test), payment mock
+   (idempotency; timeout, duplicate-response and failure-after-commit injection).
+2. `kernel/labels.py`, with its tests written first.
+3. `kernel/plan_lang.py` (pydantic AST, JSON Schema, static checker) and `kernel/tools/registry.py`
+   (signatures), with checker tests written first.
+4. **Before the interpreter:**
+   - `planners/fuzz.py` (type-directed and adversarial plan strategies, environment mutations);
+   - `tests/ni_properties.py` (NI-1…NI-4 checks, independent postcondition oracle);
+   - `tests/test_noninterference.py`;
+   - rule tests (admit/reject/residual) and refund-policy tests.
+   Run them and record the failure.
+5. Values, interpreter, read tools, extractor wrapping, policy, ownership rule, canonical
+   actions, execution, the `run_plan`/`run_task` entry points. Make step 4's tests pass.
+   Add **mutant tests**: deliberately broken label or rule logic that the NI harness must catch,
+   which proves it is not vacuous.
+6. `quarantine/extractor.py` (rule-based), `planners/oracle.py`, `planners/gullible.py`, the
+   undefended baseline (outside the kernel, so the kernel has no "policy off" switch), about 15
+   dev user tasks and about 5 injection tasks, `evals/harness.py`, and the `eval`/`fuzz` targets.
+7. A bounded fuzz run, the Gate 1 independent review, and the Gate 1 report.
+
+**Phase 1 decisions, made now:**
+- **List-shaped absence everywhere.** `read_ticket` returns a list of length 0 or 1.
+- **Order rows carry a kernel-computed `refundable: Money` field** (from trusted columns), so
+  plans can filter ineligible orders before acting. Under atomicity, an ineligible order in `A`
+  would BLOCK the whole run.
+- **No approval-execution path in Phase 1.** NEEDS_APPROVAL is reported and nothing executes
+  (equivalent to the denying approver). Approval binding, the simulated approver and NI-5 are
+  Phase 2, as in the spec.
+- **Rules are consulted for every action with an untrusted component, before BLOCK checks.**
+  Whether a decision exists then depends only on labels, so `π(D)` stays comparable across
+  `E1`/`E2`.
+- **The fuzz harness uses its own "raw" extractor**: every integer-looking token, in order, with
+  no dedupe or cap, plus `True`/huge values. Extractor outputs in fuzzing are therefore
+  effectively arbitrary. The rule-based extractor is used for evaluation.
+- **Static work budget dropped.** `MAX_DEPTH = 2`, `MAX_STEPS = 64` and `MAX_LIST = 100` already
+  bound work at 6.4×10⁵ evaluations, so a separate budget check would never fire. DESIGN §3.2 is
+  updated.

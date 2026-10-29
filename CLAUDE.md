@@ -24,11 +24,11 @@ The non-interference test in `docs/SPEC.md` §5 is how we check this invariant. 
 
 - **Plan each phase before coding.** Append the plan and any non-obvious decision (with the alternatives you rejected) to `docs/DECISIONS.md`. The decision log is a deliverable: it is how the owner defends the design in interviews.
 - **Write invariant tests before the code they test.** That applies to the non-interference property, the declassification rules, and approval binding. A test written after the implementation tends to encode the implementation's assumptions.
-- **Verify before reporting.** Run `make check` and the relevant eval targets, and read the output yourself before claiming anything works. Report only numbers produced by commands run in this session, and quote the commands.
+- **Verify before reporting.** Run `uv run --locked python scripts/tasks.py check` and the relevant eval targets, and read the output yourself before claiming anything works. Report only numbers produced by commands run in this session, and quote the commands.
 - **If a test, policy, or invariant blocks a legitimate task, that is a finding.** Record it; do not weaken the check. Results that show real costs are more valuable than results that look good.
 - **Stop at every gate** (`⛔ GATE` in the spec). Post a report using the template in `docs/SPEC.md` §9, then wait for the owner's decision.
 - **At each gate, run an independent review first.** Spawn a reviewer subagent that gets only the threat model, the design doc, and the code. It never sees your reasoning or the eval results. Its job is to find a way to violate the invariant. Include its findings verbatim in the gate report and address each one.
-- **Commit after each coherent step** with a descriptive message. Keep `make check` green on every commit.
+- **Commit after each coherent step** with a descriptive message. Keep `scripts/tasks.py check` green on every commit.
 - **Ask the owner** only about scope changes or gate outcomes that change direction. For everything else, decide, record it in `docs/DECISIONS.md`, and continue.
 - **Keep this file current.** Update "Current status" and "Commands" as they change, so a future session can resume cold.
 
@@ -43,23 +43,20 @@ The non-interference test in `docs/SPEC.md` §5 is how we check this invariant. 
 
 ## Commands
 
-Setup: `uv sync --locked` (Python 3.12, deps pinned in `uv.lock`). Every `make` target is a
-one-line delegation to `scripts/tasks.py`. Where `make` is not installed (as on the development
-machine), run `uv run --locked python scripts/tasks.py <target>` instead.
+The canonical interface is `uv run --locked python scripts/tasks.py <target>`; use it in docs, reports
+and gate reports. The `Makefile` is a thin convenience alias (`make <target>` runs the same thing) and
+`make` is deliberately not installed on the development machine. Setup: `uv sync --locked`
+(Python 3.12, dependencies pinned in `uv.lock`).
 
-- `make check`: ruff lint + format check, `mypy --strict` on `kernel/`, pytest (Hypothesis
-  derandomized via the `check` profile). Also `make lint`, `make typecheck`, `make test`.
-- `make fuzz`: long-running non-interference fuzzing (`HYPOTHESIS_PROFILE=fuzz`). Phase 1, not yet.
-- `make eval`: default offline evaluation (no LLM). Phase 1, not yet.
-- `make eval-llm`: evaluation with the local model. Phase 4, not yet.
-- `make report`: regenerate `docs/RESULTS.md`. Phase 5, not yet.
-- `make demo`: scripted demonstration. Phase 5, not yet.
+- `check`: ruff lint + format check, `mypy --strict` on `kernel/`, pytest (Hypothesis derandomized
+  via the `check` profile). Also `lint`, `typecheck`, `test`.
+- `fuzz`: long-running non-interference fuzzing (`HYPOTHESIS_PROFILE=fuzz`).
+- `eval`: default offline evaluation (no LLM).
+- `eval-llm`: evaluation with the local model. Phase 4, not yet.
+- `report`: regenerate `docs/RESULTS.md`. Phase 5, not yet.
+- `demo`: scripted demonstration. Phase 5, not yet.
 
 ## Current status
 
-Phase: 0 complete, waiting at GATE 0 for the owner's decision. Design in `docs/DESIGN.md`,
-threat model in `docs/THREAT_MODEL.md`, decisions D-001…D-019 and spec issues S-1…S-20 in
-`docs/DECISIONS.md`, independent review and responses in `docs/reviews/GATE0_REVIEW.md`. No
-feature code yet: `kernel/` is an empty package. Next (Phase 1): write the NI fuzzer and invariant
-tests (NI-1…NI-5) before labels/interpreter/policy; install the network audit hook in eval/fuzz
-entry points too.
+Phase: 1 in progress (Gate 0 approved 2026-10-29). See `docs/DECISIONS.md` "Phase 1 plan" for
+the step list and progress.
