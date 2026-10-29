@@ -618,3 +618,14 @@ Revisit with Phase 2 intent ids.
   with the first such tool.
 - Fuzz gaps listed by the reviewer and not closed in Phase 1: a non-literal ticket id, extraction
   from `subject`, maps in filter sources, readable `display_name`. Recorded for Phase 2.
+
+## Phase 1 verification status (for Gate 1)
+
+- 20,000-example fuzz (`tasks.py fuzz --hypothesis-seed=20261029`) completed on **0c25bff**
+  (before the Gate 1 fixes): 20,000 passing, 0 failing, 704 invalid, 237 s.
+- The same command on **5692a2b** (after the fixes, now covering the multi-run property too)
+  was stopped by the session's low-memory guard (about 550 MB free) before printing results.
+  Not restarted. On 5692a2b only the derandomized check profile has run: 200 + 200 examples,
+  0 failing. Rule-admission coverage in the single-run property fell from 11.6% (0c25bff) to
+  4.9% (5692a2b), because the new shapes dilute it and admissions now also need a
+  never-refunded order.
