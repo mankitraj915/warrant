@@ -11,7 +11,7 @@ from typing import Any
 
 from domain.payment_mock import PaymentMock
 from domain.seed import REFUND_WINDOW_DAYS
-from kernel.labels import join
+from kernel.labels import cell_origin, join
 from kernel.run import RunResult
 
 OWNERSHIP = "ticket_order_ownership"
@@ -49,11 +49,28 @@ def check_ni1(r1: RunResult, r2: RunResult) -> None:
         )
 
 
+# Each rule's declared endorsable origins (DESIGN §6.2), restated independently.
+def _ownership_origins(ticket: int) -> set[str]:
+    return {cell_origin("tickets", ticket, c) for c in ("subject", "body", "@row")}
+
+
 def check_ni2(r: RunResult) -> None:
-    admitted = {d.site for d in r.rule_log if d.admitted}
+    """Every untrusted ALLOW has its own logged admitting decision, and the
+    endorsed origins lie within that rule's declared set."""
+    sites = [a.site for a in r.actions]
+    if len(set(sites)) != len(sites):
+        raise NIViolation(f"NI-2 action sites are not unique: {sites}")
+    admitted = {d.site: d.rule for d in r.rule_log if d.admitted}
     for a, v in zip(r.actions, r.verdicts, strict=True):
-        if v.kind == "ALLOW" and not effective_trusted(a) and a.site not in admitted:
+        if v.kind != "ALLOW" or effective_trusted(a):
+            continue
+        if admitted.get(a.site) is None or admitted[a.site] != v.rule:
             raise NIViolation(f"NI-2 untrusted action allowed without a rule: {a.site} {v}")
+        if v.rule == OWNERSHIP:
+            allowed = _ownership_origins(int(a.canonical_args()["ticket_id"]))
+            origins = join(*a.component_labels().values()).untrusted
+            if not origins <= allowed:
+                raise NIViolation(f"NI-2 endorsed origins {sorted(origins)} outside the rule's set")
 
 
 def check_ni3(
@@ -84,7 +101,7 @@ def _eligible(db: sqlite3.Connection, customer_id: int) -> set[int]:
 
 def check_ni4(r: RunResult, pre: sqlite3.Connection) -> None:
     """Every executed refund admitted by the ownership rule meets its postcondition."""
-    if r.outcome != "executed":
+    if r.outcome not in ("executed", "partial", "indeterminate"):
         return
     by_ticket: dict[int, int] = {}
     for a in r.actions:
@@ -104,6 +121,8 @@ def check_ni4(r: RunResult, pre: sqlite3.Connection) -> None:
             problems.append("amount is not the full refundable amount")
         if pre.execute("SELECT 1 FROM refunds WHERE ticket_id = ?", (ticket,)).fetchone():
             problems.append("ticket already had a refund")
+        if pre.execute("SELECT 1 FROM refunds WHERE order_id = ?", (order,)).fetchone():
+            problems.append("order already had a refund")
         if by_ticket[ticket] != 1:
             problems.append("more than one refund for the ticket in this run")
         if problems:

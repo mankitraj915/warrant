@@ -14,7 +14,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from itertools import islice
 
-from .labels import Label, join
+from .labels import BOTTOM, Label, join
 from .plan_lang import (
     LIT_BOUND,
     CallStep,
@@ -35,6 +35,9 @@ from .values import UNIT_VALUE, ListV, Py, Record, Scalar, Value, plain, whole_l
 MAX_EXTRACT = 5
 Site = tuple[int, ...]
 Extractor = Callable[[str], list[object]]
+# Sites are paths: step indices and map iterations are >= 0; a negative entry
+# -(i + 1) is the i-th argument of a call or op (or -1, a map/filter source), so
+# two maps inside one expression never share a site (Gate 1 review #5).
 
 
 # --- label rules (DESIGN §3, §3.1) -------------------------------------------------
@@ -54,9 +57,12 @@ def at_structure_label(structure: Label, index: Label) -> Label:
     return join(structure, index)
 
 
-def extraction_label(text: Label) -> Label:
-    """The extractor's output is as untrusted as its input, whatever it returns."""
-    return text
+def extraction_label(text: Label, seen: Label) -> Label:
+    """The extractor's output is as untrusted as its input, whatever it returns,
+    and as every earlier input of this run: an extractor with memory must not
+    turn untrusted ids into trusted ones (Gate 1 review #4). ``seen`` joins the
+    labels of all texts already passed to the extractor in this run."""
+    return join(text, seen)
 
 
 # --- resolved actions ----------------------------------------------------------------
@@ -95,6 +101,7 @@ class Interpreter:
         self._db = db
         self._extractor = extractor
         self._plan_label = plan_label
+        self._extracted = BOTTOM
         self.actions: list[ResolvedAction] = []
 
     def resolve(self, plan: Plan) -> list[ResolvedAction]:
@@ -118,7 +125,10 @@ class Interpreter:
         return last
 
     def _call(self, step: CallStep, scope: dict[str, Value], pc: Label, site: Site) -> Value:
-        args = {name: self._expr(e, scope, pc, site) for name, e in step.args.items()}
+        args = {
+            name: self._expr(e, scope, pc, (*site, -(j + 1)))
+            for j, (name, e) in enumerate(step.args.items())
+        }
         spec = TOOLS[step.call]
         if spec.consequential:
             self.actions.append(ResolvedAction(site, spec.name, args, pc))
@@ -133,7 +143,8 @@ class Interpreter:
         return self._extract(_scalar(args["text"]))
 
     def _extract(self, text: Scalar) -> ListV:
-        label = extraction_label(text.label)
+        label = extraction_label(text.label, self._extracted)
+        self._extracted = join(self._extracted, text.label)
         try:
             ids = validated_ids(self._extractor(str(text.value)))
         except Exception:  # the extractor is untrusted and may fail arbitrarily
@@ -150,9 +161,11 @@ class Interpreter:
                 value = value.field(name)
             return value
         if isinstance(e, Op):
-            return self._op(e, [self._expr(a, scope, pc, site) for a in e.args])
+            return self._op(
+                e, [self._expr(a, scope, pc, (*site, -(i + 1))) for i, a in enumerate(e.args)]
+            )
         if isinstance(e, MapExpr):
-            over = _list(self._expr(e.map.over, scope, pc, site))
+            over = _list(self._expr(e.map.over, scope, pc, (*site, -1)))
             inner_pc = body_pc(pc, over.label)
             results = tuple(
                 self._block(
@@ -162,7 +175,7 @@ class Interpreter:
             )
             return ListV(results, over.label)
         assert isinstance(e, FilterExpr)
-        over = _list(self._expr(e.filter.over, scope, pc, site))
+        over = _list(self._expr(e.filter.over, scope, pc, (*site, -1)))
         items = over.items[:MAX_LIST]
         predicates = [
             _scalar(self._expr(e.filter.where, {**scope, e.filter.as_: over.element(k)}, pc, site))

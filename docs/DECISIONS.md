@@ -372,6 +372,8 @@ closed-apps figure is materially above 0.7 GB.
 
 ## D-021 Ticket-row existence (review #7) is deferred to the first ticket-enumerating tool
 
+**Superseded by D-028** (Gate 1 review #1 showed keyed lookups are not exempt).
+
 Phase 1 reads tickets only by key (`read_ticket(ticket_id)`), and keyed lookups of a row the
 operator named are trusted. So in Phase 1 the environment relation `~` keeps row sets fixed. The
 existence-origin mechanism and row variation in `~` arrive with the first tool that enumerates
@@ -453,8 +455,9 @@ verdict kind. Reasons are rendered to the approver but are not part of the hash.
 
 `scripts/tasks.py fuzz` runs the NI test under `HYPOTHESIS_PROFILE=fuzz` (20,000 examples,
 randomized) with `--hypothesis-show-statistics`. Extra arguments are passed through, so
-`tasks.py fuzz --hypothesis-seed=N` reproduces a run. 20,000 was chosen so one run fits in
-under an hour on this laptop; "long" runs are repeated runs with new seeds, not one huge run.
+`tasks.py fuzz --hypothesis-seed=N` reproduces a run. One run (seed 20261029, commit 0c25bff)
+took 237 s on this laptop; "long" fuzzing means repeated runs with new seeds, which keeps each
+run bounded and its seed recorded.
 - **Random-plan generator:** template composition of the known laundering shapes (direct,
   note, select, nested, index, amount, literal, trusted), with amounts and predicates drawn
   from a type-directed expression generator. It is not a free grammar enumerator: a uniformly
@@ -513,3 +516,105 @@ executes without approval. The security checks for I1 and I4 count this as a suc
 
 None. No policy, rule, threshold or kernel code refers to a task id, ticket, order or customer
 from the dev suite. The rule and policies are the ones written before the tasks.
+
+---
+
+## Gate 1 independent review: responses (2026-10-29)
+
+Findings and per-finding responses are in `docs/reviews/GATE1_REVIEW.md`. Decisions below.
+Regression tests are in `tests/test_gate1_regressions.py`; at commit 0c25bff (before any fix)
+`pytest tests/test_gate1_regressions.py` gave "8 failed, 2 passed" (the 2 passing are a
+guard and a utility check, not bug reproductions).
+
+## D-028 A ticket read carries its row's existence origin (supersedes D-021)
+
+`read_ticket(T)` joins `tickets[T].@row` into its structure label, whether or not the row
+exists. The ownership rule's endorsable set Ω_T includes it.
+- **Why:** customers can open tickets and ids are predictable, so whether `read_ticket(T)`
+  returns a row is attacker-influenced. D-021 argued that a lookup by an operator-named key is
+  trusted; the reviewer showed a plan (which the threat model lets be arbitrary) where that
+  bit alone selects a fully trusted refund, violating NI-1 under DESIGN §9.1's own relation.
+- **Rejected:** narrowing the NI relation to fixed ticket rows (reviewer's option b). It
+  makes the property weaker exactly where the threat model says the attacker acts.
+- **Cost, measured:** T08 ("refund all eligible orders of the customer who opened ticket
+  4080") is now decided by the ownership rule instead of being trusted. It is still admitted
+  (one eligible order), so dev metrics are unchanged; a customer with two eligible orders
+  would now need approval for this operator request.
+- **Test-harness cost, found and fixed:** with every case-ticket map now existence-tainted,
+  the rule (which decides on trusted data) masked label bugs inside those maps, and the
+  "filter ignores predicate labels" and "at ignores index label" mutants stopped being caught.
+  The fuzzer gained selection and index shapes driven by order-note text outside any ticket
+  read (`note_select`, `note_index`), whose origins no rule endorses; both mutants are caught
+  again. It also gained a `probe` shape (actions under a read of ticket 4001) and row
+  mutations (ticket 4001 opened by another customer, or the case ticket deleted).
+
+## D-029 Refund rows are written before the provider call
+
+A `pending` refund row precedes every provider call and counts as refunded for every policy
+read. On a provider exception the kernel reconciles by status: committed → record and go on;
+not committed → delete the row, stop as `aborted`/`partial`; unknown → keep the row, stop as
+`indeterminate` (new outcome). Gate 1 review #2 showed the old order (record after success,
+exception escaping `run_plan`) let a `fail_after_commit` lose the record, after which the rule
+auto-admitted a second full refund of the same order from a new ticket. This brings forward
+the "intent record before the call" part of SPEC §4.7; recovery and the crash-injection test
+remain Phase 2.
+
+## D-030 The ownership rule requires the order never to have been refunded
+
+Added condition (DESIGN §6.2 item 4). Gate 1 review #3: once-per-ticket does not bound a
+customer who can open tickets, so after a deliberate partial refund each new ticket could
+release the remainder automatically. Rejected: "no refund for any ticket of C within a window"
+(adds a time parameter for no extra protection in Phase 1 data). Cost on the dev suite: none
+(no data-dependent task has a prior refund on the named order).
+
+## D-031 Extraction labels are cumulative within a run
+
+The extractor's output label is its input label joined with every text label already passed
+to the extractor in the run (Gate 1 review #4). Rejected: forbidding extraction from trusted
+text (it does not help if a stateful extractor is fed untrusted text later), and a per-call
+extractor factory (Python callables can still share module state, so it would be a convention,
+not enforcement). Cross-run state stays a contract requirement; the Phase 4 adapter gets the
+test DESIGN §3 already calls for.
+
+## D-032 Sites are unique paths; NI-2 checks uniqueness and the rule's origin set
+
+Call and operator arguments and map/filter sources add a negative path element, so two maps
+in one expression no longer share a site (Gate 1 review #5). The NI-2 oracle now fails on
+duplicate sites, requires each untrusted ALLOW to have its own admitting decision from the
+same rule, and checks the endorsed origins against the rule's declared set (restated
+independently in `tests/ni_properties.py`). NI-4 also checks "order never refunded" and covers
+`partial`/`indeterminate` runs.
+
+## D-033 Cross-run harness and new mutants
+
+`test_noninterference_multirun` implements the multi-run property DESIGN §9.4 had promised
+but Phase 1 had not built (review #6). Mutants added: rule ignores origin set (single-run),
+and three caught only by the multi-run property: rule drops once-per-ticket, rule drops
+never-refunded, execution records only after the provider confirms (extension point
+`kernel.execution.PENDING_FIRST`). All 10 mutants are caught at 600 derandomized examples.
+- **Generator bias, recorded:** the multi-run plans are weighted towards trusted partial
+  refunds in run 1 and the canonical data-dependent plan on a new ticket in run 2. Uniform
+  random plans reached the relevant chains about once per few hundred examples and missed two
+  of the three mutants; the first weighting attempt still missed all three until the scenario
+  draws were made explicit and reported as Hypothesis events.
+- `check` now takes about 82 s (was about 30 s), mostly the multi-run mutants.
+
+## D-034 Second refund on the same order and ticket is BLOCKed
+
+Policy P3 gains "this order was already refunded for this ticket" (Gate 1 review #7), so it
+is never reported as executed while the provider silently deduplicates. This also closes the
+D-026 limitation for Phase 1; a genuinely needed second partial refund now needs a new ticket.
+Revisit with Phase 2 intent ids.
+
+## D-035 Smaller review items
+
+- No tool parameter may be named `pc` (asserted at import in the registry; review #8).
+- Deferred to Phase 2 with approval execution (review #8): a fresh random `run_id` per run
+  (Phase 1's `run_id = task_id` is harmless while nothing executes on approval), and whether
+  the canonical set should bind rule decisions and the plan label. Site is deliberately not
+  bound: it is an internal path, and binding it would let a cosmetic plan change invalidate an
+  approval of identical actions.
+- P5 sinks are not enforced in Phase 1 because no tool has a sink-bearing argument; enforced
+  with the first such tool.
+- Fuzz gaps listed by the reviewer and not closed in Phase 1: a non-literal ticket id, extraction
+  from `subject`, maps in filter sources, readable `display_name`. Recorded for Phase 2.

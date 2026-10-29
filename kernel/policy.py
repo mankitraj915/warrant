@@ -61,6 +61,8 @@ def _refund_block_reason(
     refundable = reader.refundable(order)
     if amount > refundable:
         return f"amount {amount} exceeds refundable {refundable}"
+    if reader.refund_exists(order, ticket):  # Gate 1 review #7: never a silent no-op
+        return "this order was already refunded for this ticket"
     duplicates = [
         a for a in actions if a.tool == "issue_refund" and plain(a.args["order_id"]) == order
     ]

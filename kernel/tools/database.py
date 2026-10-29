@@ -12,7 +12,7 @@ trusted columns only.
 import sqlite3
 from dataclasses import dataclass
 
-from ..labels import Label
+from ..labels import Label, join
 from ..values import ListV, Record, Scalar, Value
 
 UNTRUSTED_COLUMNS: dict[str, frozenset[str]] = {
@@ -22,6 +22,7 @@ UNTRUSTED_COLUMNS: dict[str, frozenset[str]] = {
 }
 REFUND_WINDOW_DAYS = 30
 MAX_LIST = 100
+EXISTS = "@row"  # pseudo-column: the existence of a customer-creatable row
 
 
 def lossless_text(raw: bytes) -> str:
@@ -89,10 +90,22 @@ class TrustedReader:
         row = self._db.execute("SELECT 1 FROM refunds WHERE ticket_id = ?", (ticket_id,))
         return row.fetchone() is not None
 
+    def order_has_refund(self, order_id: int) -> bool:
+        row = self._db.execute("SELECT 1 FROM refunds WHERE order_id = ?", (order_id,))
+        return row.fetchone() is not None
+
+    def refund_exists(self, order_id: int, ticket_id: int) -> bool:
+        row = self._db.execute(
+            "SELECT 1 FROM refunds WHERE order_id = ? AND ticket_id = ?", (order_id, ticket_id)
+        )
+        return row.fetchone() is not None
+
 
 class Database:
     """Read tools. Each result's structure label is the label of the arguments
-    that selected it; selection here only reads trusted key columns."""
+    that selected it; selection here only reads trusted key columns. Customers
+    can open tickets, so whether a ticket row exists is untrusted: ``read_ticket``
+    also joins the existence origin ``tickets[T].@row`` (Gate 1 review #1)."""
 
     def __init__(self, db: sqlite3.Connection) -> None:
         self._db = db
@@ -103,12 +116,14 @@ class Database:
             "SELECT id, customer_id, subject, body, status FROM tickets WHERE id = ?",
             (ticket_id.value,),
         ).fetchone()
+        exists = Label.untrusted_cell("tickets", int(ticket_id.value), EXISTS)
+        structure = join(ticket_id.label, exists)
         records: tuple[Value, ...] = ()
         if row is not None:
             names = ("id", "customer_id", "subject", "body", "status")
             fields = {n: _cell("tickets", row[0], n, v) for n, v in zip(names, row, strict=True)}
-            records = (Record(fields, ticket_id.label),)
-        return ListV(records, ticket_id.label)
+            records = (Record(fields, structure),)
+        return ListV(records, structure)
 
     def query_orders(self, customer_id: Scalar) -> ListV:
         rows = self._db.execute(

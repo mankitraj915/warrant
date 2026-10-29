@@ -28,7 +28,9 @@ from .tools.registry import signatures
 from .values import Record, Scalar
 
 OPERATOR = Label.trusted_source("operator")
-Outcome = Literal["executed", "blocked", "needs_approval", "rejected", "aborted", "partial"]
+Outcome = Literal[
+    "executed", "blocked", "needs_approval", "rejected", "aborted", "partial", "indeterminate"
+]
 
 
 @dataclass

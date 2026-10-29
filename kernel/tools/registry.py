@@ -136,6 +136,10 @@ TOOLS: dict[str, ToolSpec] = {
 }
 
 
+# The policy names the pc component "pc" (Gate 1 review #8).
+assert all(name != "pc" for spec in TOOLS.values() for name, _ in spec.params)
+
+
 def signatures() -> str:
     """Human-readable tool signatures: the planner's view of the tools."""
     lines = []

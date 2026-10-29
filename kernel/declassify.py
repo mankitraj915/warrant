@@ -6,13 +6,15 @@ as a ``RuleDecision`` whether it admits or not.
 
 Rule ``ticket_order_ownership`` (DESIGN §6.2): an order id read from a ticket
 may target a refund only when it is that ticket's customer's single eligible
-order, for its full refundable amount, once per ticket ever.
+order, never refunded before, for its full refundable amount, once per ticket
+ever. The untrusted origins it may endorse are the ticket's own subject, body
+and existence (``tickets[T].@row``).
 
 - Release (theta = 0): one bit per ticket, whether the rule admits. The admitted
   action itself is a function of trusted data. Release projection:
   ``(rule, site, admitted)``.
 - Residual risk: injected text can suppress the run (route it to approval or
-  block it); it cannot redirect the refund.
+  block it) or trigger the one admissible refund; it cannot redirect it.
 """
 
 from collections.abc import Sequence
@@ -20,7 +22,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from .labels import Label, cell_origin
-from .tools.database import TrustedReader
+from .tools.database import EXISTS, TrustedReader
 from .values import plain
 
 if TYPE_CHECKING:
@@ -56,9 +58,9 @@ def ticket_order_ownership(
         return decision(False, "ticket_id is untrusted")
     args = action.canonical_args()
     ticket, order, amount = int(args["ticket_id"]), int(args["order_id"]), int(args["amount"])
-    case_text = {cell_origin("tickets", ticket, c) for c in ("subject", "body")}
+    case_ticket = {cell_origin("tickets", ticket, c) for c in ("subject", "body", EXISTS)}
     for name, label in components.items():
-        if not label.untrusted <= case_text:
+        if not label.untrusted <= case_ticket:
             return decision(False, f"{name} has untrusted origins outside ticket {ticket}")
 
     customer = reader.ticket_customer(ticket)
@@ -70,6 +72,8 @@ def ticket_order_ownership(
         return decision(False, "order is not eligible for a refund")
     if REQUIRE_UNIQUE_ELIGIBLE and len(eligible) != 1:
         return decision(False, f"customer has {len(eligible)} eligible orders")
+    if reader.order_has_refund(order):
+        return decision(False, "order already has a refund")
     if amount != reader.refundable(order):
         return decision(False, "amount is not the full refundable amount")
     if any(

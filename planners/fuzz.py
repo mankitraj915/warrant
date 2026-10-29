@@ -2,13 +2,18 @@
 
 - ``worlds()``: small seeded worlds, each with a "case" customer (100) whose
   ticket (4000) the attacker can write, so declassification is exercised.
-- ``mutated(world)``: the same world with attacker-controlled cells rewritten.
+- ``mutated(world)``: the same world with attacker-controlled cells rewritten,
+  and possibly with customer-created ticket rows added or removed (a ticket
+  ``PROBE_TICKET`` opened by another customer, or the case ticket deleted).
   Payloads name the case's own orders, other customers' orders, duplicates, too
   many ids, extreme integers, booleans and invalid UTF-8.
 - ``plans(world)``: compositions of the known laundering shapes (selection by
   tainted predicate, tainted index, tainted amount arithmetic, nested
   map/filter, literal-argument calls in tainted maps, text from other origins,
-  trusted actions mixed with tainted ones). Amounts and predicates inside the
+  trusted actions mixed with tainted ones, actions under a read of a ticket
+  that may not exist). Selection and index shapes are also driven by order-note
+  text, outside any ticket read, so label bugs cannot hide behind the ownership
+  rule. Amounts and predicates inside the
   shapes are drawn from a type-directed expression generator.
 - ``raw_extractor``: every integer or TRUE/FALSE token, in order, with no
   dedupe and no cap, so extractor outputs are effectively arbitrary.
@@ -16,6 +21,7 @@
 
 import re
 from collections.abc import Callable
+from dataclasses import replace
 from itertools import count
 
 from hypothesis import strategies as st
@@ -24,6 +30,7 @@ from domain.seed import Customer, Order, Payment, Text, Ticket, World, generate
 from planners.builders import Json, call, expr, filter_, lit, map_, op, plan, ref
 
 CASE_CUSTOMER, OTHER_CUSTOMER, CASE_TICKET = 100, 101, 4000
+PROBE_TICKET = 4001  # a ticket id another customer may or may not have opened
 UNTRUSTED_CELLS = (
     ("tickets", "subject"),
     ("tickets", "body"),
@@ -84,15 +91,25 @@ def payloads(world: World) -> st.SearchStrategy[Text]:
 
 def mutated(world: World) -> st.SearchStrategy[World]:
     cells = [(t, row.id, c) for t, c in UNTRUSTED_CELLS for row in getattr(world, t)]
-    cell = st.one_of(st.just(("tickets", CASE_TICKET, "body")), st.sampled_from(cells))
+    cell = st.one_of(
+        st.just(("tickets", CASE_TICKET, "body")),
+        st.sampled_from([("orders", o, "customer_note") for o in (7000, 7001)]),
+        st.sampled_from(cells),
+    )
+    rows = st.sampled_from(["same", "same", "same", "open_probe", "delete_case"])
 
-    def build(edits: list[tuple[tuple[str, int, str], Text]]) -> World:
+    def build(edits: list[tuple[tuple[str, int, str], Text]], row_change: str) -> World:
         w = world
+        if row_change == "open_probe":
+            w = w.extend(tickets=(Ticket(PROBE_TICKET, OTHER_CUSTOMER, "Hi", "Refund #7100"),))
         for (table, key, column), value in edits:
-            w = w.replace_text(table, key, column, value)
+            if any(t.id == key for t in w.tickets) or table != "tickets":
+                w = w.replace_text(table, key, column, value)
+        if row_change == "delete_case":
+            w = replace(w, tickets=tuple(t for t in w.tickets if t.id != CASE_TICKET))
         return w
 
-    return st.lists(st.tuples(cell, payloads(world)), max_size=6).map(build)
+    return st.builds(build, st.lists(st.tuples(cell, payloads(world)), max_size=6), rows)
 
 
 # --- plans -------------------------------------------------------------------------
@@ -141,9 +158,9 @@ def _predicate(draw: Draw, rec: str, oid_lists: list[Json], depth: int = 0) -> J
 def _ids(draw: Draw, world: World) -> tuple[int, int, int]:
     """Ticket, customer, order: usually coherent (the ticket's customer and one of
     their orders), sometimes arbitrary, so both allowed and blocked paths are hit."""
-    other_tickets = st.sampled_from([t.id for t in world.tickets])
+    other_tickets = st.sampled_from([t.id for t in world.tickets] + [PROBE_TICKET])
     ticket = draw(st.one_of(st.just(CASE_TICKET), st.just(CASE_TICKET), other_tickets))
-    owner = {t.id: t.customer_id for t in world.tickets}[ticket]
+    owner = {t.id: t.customer_id for t in world.tickets}.get(ticket, OTHER_CUSTOMER)
     coherent = draw(st.sampled_from([True, True, True, False]))
     customers = [owner] if coherent else [CASE_CUSTOMER, OTHER_CUSTOMER, 1]
     customer = draw(st.sampled_from(customers))
@@ -164,7 +181,19 @@ def _shape(draw: Draw, world: World, n: _Names) -> list[Json]:
     extract = call("extract_order_ids", oids, text=ref(tk, "body"))
     kind = draw(
         st.sampled_from(
-            ["direct", "note", "select", "index", "amount", "literal", "trusted", "nested"]
+            [
+                "direct",
+                "note",
+                "select",
+                "index",
+                "amount",
+                "literal",
+                "trusted",
+                "nested",
+                "note_select",
+                "note_index",
+                "probe",
+            ]
         )
     )
     if kind == "direct":  # canonical: refund each extracted id
@@ -231,6 +260,31 @@ def _shape(draw: Draw, world: World, n: _Names) -> list[Json]:
             _refund(lit(t_id), lit(o_id), _amount(draw, [ref(amt)])),
         )
         return [read, expr(map_(ref(t), tk, extract, expr(body)))]
+    if kind in ("note_select", "note_index"):  # selection by order-note text
+        orders, sel, s, picked = n("orders"), n("sel"), n("s"), n("picked")
+        note_ids = call("extract_order_ids", oids, text=ref(o, "customer_note"))
+        if kind == "note_select":
+            mentioned = op("contains", ref(oids), ref(s, "id"))
+            pred = draw(st.sampled_from([mentioned, op("and", mentioned, _predicate(draw, s, []))]))
+            pick = expr(filter_(ref(orders), s, pred), sel)
+        else:
+            index = op("sub", op("len", ref(oids)), lit(draw(st.sampled_from([0, 1]))))
+            pick = expr(op("at", ref(orders), index), sel)
+        return [
+            call("query_orders", orders, customer_id=lit(c_id)),
+            expr(
+                map_(
+                    ref(orders),
+                    o,
+                    note_ids,
+                    pick,
+                    expr(map_(ref(sel), picked, _refund_rec(t_id, picked, draw))),
+                )
+            ),
+        ]
+    if kind == "probe":  # actions under a read of a ticket that may not exist
+        probe = call("read_ticket", t, ticket_id=lit(PROBE_TICKET))
+        return [probe, expr(map_(ref(t), tk, _refund(lit(t_id), lit(o_id), _amount(draw, []))))]
     if kind == "literal":  # all-literal call inside a tainted map
         x = n("x")
         body = map_(ref(oids), x, _refund(lit(t_id), lit(o_id), _amount(draw, [])))

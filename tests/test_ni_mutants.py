@@ -13,11 +13,13 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 import kernel.declassify
+import kernel.execution
 import kernel.interpreter
 import kernel.policy
 from kernel.labels import BOTTOM, Label
+from kernel.tools.database import TrustedReader
 from tests.ni_properties import NIViolation
-from tests.test_noninterference import ni_property
+from tests.test_noninterference import multirun_property, ni_property
 
 
 def _filter_ignores_predicates(over: Label, preds: list[Label]) -> Label:
@@ -28,12 +30,24 @@ def _body_pc_ignores_list(pc: Label, structure: Label) -> Label:
     return pc
 
 
-def _extraction_trusted(text: Label) -> Label:
+def _extraction_trusted(text: Label, seen: Label) -> Label:
     return BOTTOM
 
 
 def _at_ignores_index(structure: Label, index: Label) -> Label:
     return structure
+
+
+_rule = kernel.declassify.ticket_order_ownership
+
+
+def _rule_ignores_origins(action: Any, components: Any, actions: Any, reader: Any) -> Any:
+    """The ownership rule endorses untrusted data from anywhere, not just the ticket."""
+    return _rule(action, {n: BOTTOM for n in components}, actions, reader)
+
+
+def _never(self: Any, *args: Any) -> bool:
+    return False
 
 
 MUTANTS: dict[str, tuple[Any, str, Any]] = {
@@ -51,10 +65,29 @@ MUTANTS: dict[str, tuple[Any, str, Any]] = {
     "at ignores index label": (kernel.interpreter, "at_structure_label", _at_ignores_index),
     "policy ignores pc": (kernel.policy, "PC_IS_A_COMPONENT", False),
     "ownership rule drops uniqueness": (kernel.declassify, "REQUIRE_UNIQUE_ELIGIBLE", False),
+    # Added after the Gate 1 review (findings 2, 3 and 6).
+    "ownership rule ignores origin set": (
+        kernel.policy,
+        "ticket_order_ownership",
+        _rule_ignores_origins,
+    ),
+}
+MULTIRUN_MUTANTS: dict[str, tuple[Any, str, Any]] = {
+    "ownership rule drops once-per-ticket across runs": (
+        TrustedReader,
+        "ticket_has_refund",
+        _never,
+    ),
+    "ownership rule drops never-refunded order": (TrustedReader, "order_has_refund", _never),
+    "execution writes no record before the provider call": (
+        kernel.execution,
+        "PENDING_FIRST",
+        False,
+    ),
 }
 
 
-def _run_property(max_examples: int) -> Callable[[], None]:
+def _run_property(max_examples: int, prop_fn: Any = ni_property) -> Callable[[], None]:
     @settings(
         max_examples=max_examples,
         derandomize=True,
@@ -64,7 +97,7 @@ def _run_property(max_examples: int) -> Callable[[], None]:
     )
     @given(st.data())
     def prop(data: Any) -> None:
-        ni_property(data)
+        prop_fn(data)
 
     return prop
 
@@ -75,3 +108,11 @@ def test_ni_harness_catches_mutant(name: str, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(module, attribute, replacement)
     with pytest.raises(NIViolation):
         _run_property(600)()
+
+
+@pytest.mark.parametrize("name", sorted(MULTIRUN_MUTANTS))
+def test_multirun_harness_catches_mutant(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    module, attribute, replacement = MULTIRUN_MUTANTS[name]
+    monkeypatch.setattr(module, attribute, replacement)
+    with pytest.raises(NIViolation):
+        _run_property(600, multirun_property)()

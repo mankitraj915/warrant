@@ -61,6 +61,6 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 
 ## Current status
 
-Phase: 1, steps 1–6 done (Gate 0 approved 2026-10-29). Next: bounded fuzz run, Gate 1
-independent review, Gate 1 report (`docs/reviews/GATE1_REVIEW.md`), then stop for the owner.
-See `docs/DECISIONS.md` "Phase 1 plan" and D-023 onward.
+Phase: 1 complete; at Gate 1 (Gate 0 approved 2026-10-29). Gate 1 independent review done and
+addressed (`docs/reviews/GATE1_REVIEW.md`, D-028–D-035). Waiting for the owner's Gate 1 decision.
+See `docs/DECISIONS.md` "Phase 1 plan" and D-023 onward. `check` takes about 1.5 min.

@@ -88,10 +88,14 @@ schema and part of the TCB:
   channel). Reading yields `U = ∅` with `P = {t[k].c}`.
 - **Row existence.** Keys are trusted. Rows of most tables are created by trusted processes;
   an order exists only through checkout and payment. **Tickets are different:** any customer,
-  including the attacker, can open them (review finding 7). So enumerating tickets (any read
-  tool that returns a *set* of tickets, not a lookup by one trusted key) joins an existence
-  origin `tickets[*@C]` for each customer `C` whose tickets could appear into the structure
-  label. A `map` over "all open tickets" therefore has an untrusted `pc`, and the number of
+  including the attacker, can open them (review finding 7), and ticket ids are predictable.
+  - A keyed lookup `read_ticket(T)` joins the existence origin `tickets[T].@row` into its
+    structure label, whether or not the row exists (Gate 1 review #1; this replaces D-021's
+    deferral). Everything computed under a `map` over a ticket read therefore has an untrusted
+    `pc`, and only a rule that endorses `tickets[T].@row` can let it act automatically.
+  - Enumerating tickets (any read tool that returns a *set* of tickets) joins an existence
+    origin `tickets[*@C]` for each customer `C` whose tickets could appear into the structure
+    label. A `map` over "all open tickets" therefore has an untrusted `pc`, and the number of
   actions it produces cannot be set by an attacker without showing up in labels. Set-level
   limits in policies are scoped per customer as well as per ticket.
 - **Sinks** carry a principal: `operator` and `customer:C` (review finding 14). Columns holding
@@ -148,9 +152,11 @@ making the ticket's own identity untrusted.
 - Operators other than `len`/`at`/`contains` accept scalars only; `min`/`max` are binary.
 
 **The extractor** is modelled as an *arbitrary* function from untrusted text to typed values, so
-its correctness is irrelevant to safety. Its output label is its input label, whatever it
-returns. That is sound only if each call depends on its own input alone (review finding 5).
-The extractor contract is therefore:
+its correctness is irrelevant to safety. Its output label is its input label joined with the
+labels of every text already passed to the extractor in the same run, whatever it returns
+(Gate 1 review #4). That makes state carried *within* a run harmless. State carried *across*
+runs (a cache, reused KV state) is not covered by labels, so the contract still requires
+statelessness, and it is enforced only by review and, in Phase 4, by a test of the LLM adapter:
 - **Stateless per call.** No shared context, cache, or KV state across calls, and no run-wide
   budgets.
 - **Bounded per call.** A deterministic per-call limit, in tokens rather than wall-clock time.
@@ -306,8 +312,10 @@ A run has four phases. Nothing consequential happens before phase 4.
 1. **Check:** static checker (§4). A rejected plan executes nothing.
 2. **Resolve:** evaluate the plan, executing *read* tools and the extractor only. Each
    consequential call becomes a **resolved action** `a = (site, tool, args, pc)`. `args` are
-   labelled values; `site` is the step index plus the `map` iteration indices. The result is the
-   ordered action list `A`.
+   labelled values; `site` is the path to the call: step indices and `map` iteration indices,
+   plus `-(i+1)` for the i-th argument of a call or operator and `-1` for a `map`/`filter`
+   source, so every action in a run has a distinct site (Gate 1 review #5). Sites depend only
+   on plan structure and iteration counts. The result is the ordered action list `A`.
 3. **Decide:** run the policy on every action (§6), producing `ALLOW`, `NEEDS_APPROVAL` or
    `BLOCK` with a reason and any rule decisions. Then combine **atomically**:
    - all `ALLOW` → execute `A`;
@@ -415,7 +423,7 @@ Applies to `issue_refund(ticket_id, order_id, amount)`.
 - **Precondition:** `ticket_id` is trusted. Let `T` be its value and `C = tickets[T].customer_id`,
   a trusted column read by the rule.
 - **Endorsable components:** `order_id`, `amount`, `pc`, each only if its `U ⊆ Ω_T`, where
-  `Ω_T = {tickets[T].subject, tickets[T].body}`. Any other untrusted origin (another ticket, an
+  `Ω_T = {tickets[T].subject, tickets[T].body, tickets[T].@row}`. Any other untrusted origin (another ticket, an
   order note, `★`) means the rule does not apply.
 - **Admits iff:**
   1. `orders[order_id]` exists and its `customer_id = C`;
@@ -423,13 +431,17 @@ Applies to `issue_refund(ticket_id, order_id, amount)`.
      refunded, within the refund window on the simulated clock);
   3. `|Eligible(C)| = 1`. Variant for Phase 1 measurement: `… or Refundable(order_id) ≤ θ`, with
      `θ = 0` the default;
-  4. `amount = Refundable(order_id)`, recomputed by the rule;
+  4. `amount = Refundable(order_id)`, recomputed by the rule, and the order has **never been
+     refunded** (no refund record of any kind, pending ones included; Gate 1 review #3).
+     Without this, every new ticket the customer opens could release the remainder of a
+     deliberate partial refund;
   5. `A` contains no other `issue_refund` with `ticket_id = T`, **and** the persistent refunds
      record holds no refund for ticket `T` from any earlier run (review finding 3). The
      attacker can edit the ticket between runs, so a per-run check would allow one refund per
      re-run.
 - **One sentence:** *an order ID read from a ticket may target a refund only when it is that
-  ticket's customer's single eligible order, for its full refundable amount, once per ticket.*
+  ticket's customer's single eligible, never-refunded order, for its full amount, once per
+  ticket.*
 - **Release:** with `θ = 0` the admitted action is a function of trusted data alone (the unique
   eligible order and its recomputed amount). Untrusted text decides one bit per ticket: whether
   the rule admits. Because decisions are atomic (§5), that bit decides whether the *whole run*
@@ -437,8 +449,8 @@ Applies to `issue_refund(ticket_id, order_id, amount)`.
   - **Release projection** `π = (rule, site, outcome)`. With `θ > 0` it becomes
     `(rule, site, outcome, order_id)`. NI-3 compares exactly this projection (§9.3).
 - **Postcondition:** each executed refund admitted by this rule is on `C`'s unique eligible
-  order, for exactly its refundable amount, and is the only refund ever executed for ticket `T`,
-  across all runs.
+  order, for exactly its refundable amount, is the first refund ever recorded for that order,
+  and is the only refund ever executed for ticket `T`, across all runs.
 - **Residual risk:** the one bit cuts both ways.
   - *Suppression*: injected text can turn an automatic refund into an approval request.
   - *Triggering* (measured in Phase 1, DECISIONS F-1): injected text can turn "no refund" into
@@ -517,8 +529,10 @@ An environment `E = (DB, clock, provider)`.
 - untrusted cells may differ arbitrarily. That includes values outside the "intended" type:
   extreme integers in extractor output, and invalid UTF-8 (§3.2).
 
-Extractor outputs are part of the untrusted environment: the harness may draw them directly,
-so the property is tested for **every** extractor, not just the rule-based one.
+Extractor outputs are part of the untrusted environment. The harness uses a "raw" extractor
+whose output is an arbitrary function of the text, so the property covers every *stateless*
+extractor. Extractors with memory are covered within a run by the cumulative label (§3) and a
+regression test, not by the fuzzer.
 
 ### 9.2 Observations of a run of plan `P` in `E` with approver `Ap`
 
@@ -572,13 +586,17 @@ exception in either run fails the test.
 - Adversarial generators produce the known laundering shapes: selection by a tainted predicate,
   tainted `at` indices, `len` of tainted lists, money arithmetic on tainted values, nested
   `map`/`filter`, and calls inside tainted `map` bodies with all-literal arguments.
-- Environment mutations rewrite untrusted cells and extractor outputs, and add or remove
-  customer-created ticket rows. Their values are drawn to be dangerous: IDs of the same
+- Environment mutations rewrite untrusted cells, add a ticket opened by another customer, or
+  delete the case ticket. Their values are drawn to be dangerous: IDs of the same
   customer's other orders, other customers' orders, duplicates, empty lists, the maximum list
   length, extreme integers, and invalid UTF-8.
-- A multi-run mode applies a sequence of plans to an evolving environment, with the attacker
-  allowed to rewrite untrusted cells between runs. NI-4's cross-run postconditions are checked
-  there.
+- A multi-run property runs two plans on one evolving environment. A provider failure may be
+  injected into the first run; between runs the attacker rewrites the case ticket and may open
+  a new ticket. NI-2 and NI-4 (with its cross-run postconditions) are checked on both runs, and
+  no order may be refunded more than was paid.
+- Mutant tests break one mechanism each (four label rules, the pc component, rule uniqueness,
+  the rule's origin set, once-per-ticket, never-refunded, record-before-call) and require the
+  harness to fail.
 - `make check` runs a derandomized profile; `make fuzz` runs the `fuzz` profile. Shrunk
   counterexamples become `@example` regression tests.
 
@@ -588,13 +606,17 @@ exception in either run fails the test.
 
 As SPEC §4.7:
 
-- Before calling the provider, write an intent record with business idempotency key
-  `refund:{order_id}:{ticket_id}`.
-- On recovery, query provider status by key before retrying.
-- One crash-injection test checks there is exactly one refund.
+- Before calling the provider, write the refund row as `pending` with business idempotency
+  key `refund:{order_id}:{ticket_id}`. Pending rows count as refunded for every policy read.
+- If the provider call raises, ask the provider for the key's status: committed → record it
+  and continue; not committed → delete the pending row and stop (`aborted` or `partial`);
+  status unknown → keep the row pending and stop (`indeterminate`). Phase 2 adds recovery of
+  pending rows and the crash-injection test.
+- A second refund on the same order and ticket is BLOCKed by the policy (P3), never absorbed
+  silently by the key (Gate 1 review #7).
 
 Idempotency is a reliability mechanism. Security never depends on it: duplicates are already
-BLOCKed by the policy (P3).
+BLOCKed by the policy (P3), and the record is written before money moves (Gate 1 review #2).
 
 ## 11. Persistence (storage label rule)
 
