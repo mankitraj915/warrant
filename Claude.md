@@ -43,15 +43,21 @@ The non-interference test in `docs/SPEC.md` §5 is how we check this invariant. 
 
 ## Commands
 
-(Fill in during Phase 0.)
+Setup: `uv sync --locked` (Python 3.12, deps pinned in `uv.lock`). Every `make` target is a
+one-line delegation to `scripts/tasks.py`. Where `make` is not installed (as on the development
+machine), run `uv run --locked python scripts/tasks.py <target>` instead.
 
-- `make check`: lint, type check, tests
-- `make fuzz`: long-running non-interference fuzzing
-- `make eval`: default offline evaluation (no LLM)
-- `make eval-llm`: evaluation with the local model
-- `make report`: regenerate `docs/RESULTS.md`
-- `make demo`: scripted demonstration
+- `make check`: ruff lint + format check, `mypy --strict` on `kernel/`, pytest (Hypothesis
+  derandomized via the `check` profile). Also `make lint`, `make typecheck`, `make test`.
+- `make fuzz`: long-running non-interference fuzzing (`HYPOTHESIS_PROFILE=fuzz`). Phase 1, not yet.
+- `make eval`: default offline evaluation (no LLM). Phase 1, not yet.
+- `make eval-llm`: evaluation with the local model. Phase 4, not yet.
+- `make report`: regenerate `docs/RESULTS.md`. Phase 5, not yet.
+- `make demo`: scripted demonstration. Phase 5, not yet.
 
 ## Current status
 
-Phase: 0 (not started)
+Phase: 0 complete, waiting at GATE 0 for the owner's decision. Design in `docs/DESIGN.md`,
+threat model in `docs/THREAT_MODEL.md`, decisions D-001…D-013 and spec issues S-1…S-20 in
+`docs/DECISIONS.md`. No feature code yet: `kernel/` is an empty package. Next (Phase 1): write the
+NI fuzzer and invariant tests before labels/interpreter/policy.
