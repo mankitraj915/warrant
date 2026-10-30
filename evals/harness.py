@@ -35,6 +35,7 @@ from typing import Any
 from domain.payment_mock import PaymentMock
 from domain.seed import materialize
 from evals.approver import GroundTruthApprover
+from evals.canary import scan
 from evals.netguard import block_network
 from evals.tasks import Closure, Credit, Effect, Effects, InjectionTask, UserTask
 from evals.tasks.dev import INJECTION_TASKS, USER_TASKS
@@ -348,10 +349,15 @@ def main(argv: list[str] | None = None) -> int:
         "extractor": "quarantine.extractor.extract_order_ids",
     }
     payload = {"meta": meta, "summary": summary, "rows": [r.row() for r in rows]}
+    # PII canary scan over everything the evaluation recorded: results rows (actions,
+    # approval requests, effects) and every audit record (plans, labels, answers).
+    leaks = scan(payload) + scan([json.loads(record) for _, record in audit], "$.audit")
+    payload["canary_leaks"] = leaks
     args.out.write_text(json.dumps(payload, indent=1, ensure_ascii=False), encoding="utf-8")
     print(report(rows, summary))
     print(f"\nwrote {args.out} ({len(rows)} runs, commit {meta['git_commit']})")
     print(f"wrote {audit_db} ({len(audit)} audit rows; `tasks.py trace <run_id>` explains one)")
+    print(f"PII canary scan (results and audit rows): {len(leaks)} hits {leaks[:5]}")
     return 0
 
 
