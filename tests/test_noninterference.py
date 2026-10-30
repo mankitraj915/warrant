@@ -3,6 +3,8 @@
 For a plan P and two worlds that agree on every trusted cell and differ only in
 attacker-controlled text, run P in both with a denying approver (Phase 1 has no
 approval-execution path) and check NI-1..NI-4. Written before the interpreter.
+Each pair of runs uses either the stateless extractor or, in a third of examples,
+a fresh counting extractor in each run (added after the Gate 2 review).
 
 Statistics (``--hypothesis-show-statistics``) report how often a rule was
 consulted, how often projections were equal, and how often a run was suppressed,
@@ -28,6 +30,7 @@ from planners.builders import Json, credit_ticket_customer, refund_from_ticket_t
 from planners.fuzz import (
     CASE_CUSTOMER,
     CASE_TICKET,
+    counting_extractor,
     mutated,
     payloads,
     plans,
@@ -54,8 +57,11 @@ def ni_property(data: Any) -> None:
     plan: Json = data.draw(plans(world), label="plan")
     w1 = data.draw(mutated(world), label="E1")
     w2 = data.draw(mutated(world), label="E2")
-    r1, env1, pre1 = run_world_env(plan, w1)
-    r2, env2, pre2 = run_world_env(plan, w2)
+    # A fresh extractor per run: stateless, or one whose output depends on how
+    # many extractions ran before it (Gate 2 review #1, #3).
+    stateful = data.draw(st.sampled_from([False, False, True]), label="counting extractor")
+    r1, env1, pre1 = run_world_env(plan, w1, counting_extractor() if stateful else raw_extractor)
+    r2, env2, pre2 = run_world_env(plan, w2, counting_extractor() if stateful else raw_extractor)
     x1, x2 = _effects(env1), _effects(env2)
 
     consulted = bool(r1.rule_log or r2.rule_log)
@@ -92,13 +98,14 @@ def _snapshot(db: sqlite3.Connection) -> sqlite3.Connection:
 def _run_plan(data: Any, world: World, tickets: list[int], first: bool, credit: bool) -> Json:
     """A random plan, or one of the paths cross-run state matters for, weighted
     towards them: trusted partial or full refunds (mostly in the first run; a
-    full refund of 7001 is what lets a second, rule-admitted refund follow) and
+    partial refund of 7000 or a full refund of 7001 is what lets a second,
+    rule-admitted refund follow) and
     the canonical data-dependent plan (mostly in the second); in a credit
     scenario, the goodwill credit plan in both runs."""
     if credit:
         kinds = ["credit"] * 5
     elif first:
-        kinds = ["trusted"] * 2 + ["clear_other"] * 2 + ["canonical"] * 2
+        kinds = ["trusted"] * 2 + ["partial"] * 2 + ["clear_other"] * 2 + ["canonical"] * 2
     else:
         kinds = ["canonical"] * 3 + ["trusted"]
     kind = data.draw(st.sampled_from(["random", *kinds]), label="plan kind")
@@ -109,6 +116,8 @@ def _run_plan(data: Any, world: World, tickets: list[int], first: bool, credit: 
         return plan
     if kind == "canonical":
         return refund_from_ticket_text(ticket)
+    if kind == "partial":  # part of 7000, so a later full refund of the rest is a second one
+        return refund_amount(ticket, 7000, 10_000)
     if kind == "clear_other":  # refund 7001 in full, leaving 7000 the unique eligible order
         return refund_amount(ticket, 7001, 450_000)
     if kind == "credit":  # the standard credit to the ticket's customer, via the ticket read

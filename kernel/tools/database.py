@@ -111,6 +111,10 @@ class TrustedReader:
         row = self._db.execute("SELECT 1 FROM credits WHERE ticket_id = ?", (ticket_id,))
         return row.fetchone() is not None
 
+    def customer_has_credit(self, customer_id: int) -> bool:
+        row = self._db.execute("SELECT 1 FROM credits WHERE customer_id = ?", (customer_id,))
+        return row.fetchone() is not None
+
     def refund_exists(self, order_id: int, ticket_id: int) -> bool:
         row = self._db.execute(
             "SELECT 1 FROM refunds WHERE order_id = ? AND ticket_id = ?", (order_id, ticket_id)

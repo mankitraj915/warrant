@@ -149,7 +149,7 @@ def _check_goodwill(
     args: dict[str, Any], pre: sqlite3.Connection, by_ticket: dict[tuple[str, int], int]
 ) -> None:
     """ticket_goodwill_credit: the standard amount, to the ticket's own customer,
-    for an allowed reason, once per ticket."""
+    for an allowed reason, once per ticket and once per customer."""
     ticket = int(args["ticket_id"])
     row = pre.execute("SELECT customer_id FROM tickets WHERE id = ?", (ticket,)).fetchone()
     problems = []
@@ -161,6 +161,9 @@ def _check_goodwill(
         problems.append("reason is not an allowed credit reason")
     if pre.execute("SELECT 1 FROM credits WHERE ticket_id = ?", (ticket,)).fetchone():
         problems.append("ticket already had a credit")
+    customer = int(args["customer_id"])
+    if pre.execute("SELECT 1 FROM credits WHERE customer_id = ?", (customer,)).fetchone():
+        problems.append("customer already had a credit")
     if by_ticket[("issue_credit", ticket)] != 1:
         problems.append("more than one credit for the ticket in this run")
     if problems:

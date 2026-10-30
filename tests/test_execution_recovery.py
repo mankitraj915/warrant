@@ -98,10 +98,15 @@ def test_duplicate_credit_after_recheck_aborts_cleanly(monkeypatch: pytest.Monke
     env = Environment(materialize(_case_world(1, "delivered")), PaymentMock(), raw_extractor)
     assert run_plan(credit_ticket_customer(CASE_TICKET), env, run_id="r-1").outcome == "executed"
     _race(monkeypatch, "ticket_has_credit")
+    _race(monkeypatch, "customer_has_credit")  # both lookups miss the racing row
     r = run_plan(credit_ticket_customer(CASE_TICKET), env, run_id="r-2")
     assert r.outcome == "aborted"
     assert env.db.execute("SELECT COUNT(*) FROM credits").fetchone() == (1,)
-    assert env.db.execute("SELECT COUNT(*) FROM audit WHERE run_id = 'r-2'").fetchone() == (1,)
+    final = env.db.execute(
+        "SELECT json_extract(record, '$.outcome') FROM audit"
+        " WHERE run_id = 'r-2' AND json_extract(record, '$.phase') = 'final'"
+    )
+    assert final.fetchall() == [("aborted",)]
 
 
 def test_closing_a_closed_ticket_after_recheck_aborts(monkeypatch: pytest.MonkeyPatch) -> None:

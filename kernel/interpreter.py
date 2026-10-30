@@ -62,8 +62,36 @@ def extraction_label(text: Label, seen: Label) -> Label:
     """The extractor's output is as untrusted as its input, whatever it returns,
     and as every earlier input of this run: an extractor with memory must not
     turn untrusted ids into trusted ones (Gate 1 review #4). ``seen`` joins the
-    labels of all texts already passed to the extractor in this run."""
+    labels of all texts already passed to the extractor in this run, and the
+    control context of every extraction call (Gate 2 review #1-2)."""
     return join(text, seen)
+
+
+# Extension point for the mutant tests; always True in use. False restores the
+# pre-Gate-2 behaviour: ``seen`` joins only text labels, and only for extractions
+# that actually run, so its trust depended on data (NI-1) and an extractor that
+# counts calls under a tainted pc could choose a "trusted" id (invariant).
+EXTRACTION_FOLLOWS_CONTROL = True
+
+
+def _extracts(steps: tuple[Step, ...]) -> bool:
+    """Whether a block syntactically contains an extraction call (at any depth)."""
+    return any(
+        (isinstance(s, CallStep) and s.call == "extract_order_ids")
+        or any(_expr_extracts(e) for e in (s.args.values() if isinstance(s, CallStep) else ()))
+        or (isinstance(s, ExprStep) and _expr_extracts(s.expr))
+        for s in steps
+    )
+
+
+def _expr_extracts(e: Expr) -> bool:
+    if isinstance(e, MapExpr):
+        return _expr_extracts(e.map.over) or _extracts(e.map.steps)
+    if isinstance(e, FilterExpr):
+        return _expr_extracts(e.filter.over) or _expr_extracts(e.filter.where)
+    if isinstance(e, Op):
+        return any(_expr_extracts(a) for a in e.args)
+    return False
 
 
 # --- resolved actions ----------------------------------------------------------------
@@ -153,11 +181,14 @@ class Interpreter:
         if spec.name == "compute_refund_amount":
             return self._db.compute_refund_amount(_scalar(args["order_id"]))
         assert spec.name == "extract_order_ids"
-        return self._extract(_scalar(args["text"]))
+        return self._extract(_scalar(args["text"]), pc)
 
-    def _extract(self, text: Scalar) -> ListV:
-        label = extraction_label(text.label, self._extracted)
-        self._extracted = join(self._extracted, text.label)
+    def _extract(self, text: Scalar, pc: Label) -> ListV:
+        # The pc joins too: whether and how often the extractor is called is
+        # state an extractor with memory can carry (Gate 2 review #1).
+        context = join(text.label, pc) if EXTRACTION_FOLLOWS_CONTROL else text.label
+        label = extraction_label(context, self._extracted)
+        self._extracted = join(self._extracted, context)
         try:
             ids = validated_ids(self._extractor(str(text.value)))
         except Exception:  # the extractor is untrusted and may fail arbitrarily
@@ -180,6 +211,11 @@ class Interpreter:
         if isinstance(e, MapExpr):
             over = _list(self._expr(e.map.over, scope, pc, (*site, -1)))
             inner_pc = body_pc(pc, over.label)
+            if EXTRACTION_FOLLOWS_CONTROL and _extracts(e.map.steps):
+                # Before iterating, even zero times: whether the body's extractions
+                # run is decided by the list, so ``seen``'s trust is syntax-determined
+                # (Gate 2 review #2, DESIGN §3.3).
+                self._extracted = join(self._extracted, inner_pc)
             results = tuple(
                 self._block(
                     e.map.steps, {**scope, e.map.as_: over.element(k)}, inner_pc, (*site, k)

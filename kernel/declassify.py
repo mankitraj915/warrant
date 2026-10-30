@@ -108,7 +108,8 @@ def ticket_goodwill_credit(
     """Rule ``ticket_goodwill_credit`` (DESIGN §6.3): a credit whose customer or pc
     comes from reading ticket T may execute automatically only if it goes to T's
     own customer, for the fixed goodwill amount, with a trusted reason, once per
-    ticket. Release: one bit per ticket (whether it is issued). Residual risk:
+    ticket and once per customer ever. Release: one bit per ticket (whether it is
+    issued), at most one admitted credit per customer. Residual risk:
     ticket text can trigger or suppress the standard credit; never redirect or
     resize it."""
 
@@ -137,6 +138,17 @@ def ticket_goodwill_credit(
         for other in actions
     ):
         return decision(False, "another credit for this ticket is in the action set")
+    if any(
+        other is not action
+        and other.tool == "issue_credit"
+        and plain(other.args["customer_id"]) == customer
+        for other in actions
+    ):
+        return decision(False, "another credit for this customer is in the action set")
     if reader.ticket_has_credit(ticket):
         return decision(False, "this ticket already has a credit")
+    if reader.customer_has_credit(customer):
+        # Per customer, not only per ticket: customers open tickets freely, so a
+        # per-ticket bound alone is unbounded per customer (Gate 2 review #6).
+        return decision(False, "this customer already has a credit")
     return decision(True, "standard goodwill credit to the ticket's customer")

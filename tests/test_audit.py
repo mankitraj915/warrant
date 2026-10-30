@@ -1,8 +1,10 @@
 """Audit log and run identity (DESIGN §7, Phase 2 step 1). Written before the code.
 
-Every run writes exactly one append-only audit row that is enough to explain
-the decision: planner-input hash, plan, resolved actions with labels, verdicts,
-rule decisions, approval request and hash, and what executed.
+Every run writes exactly one append-only "final" audit row that is enough to
+explain the decision: planner-input hash, plan, resolved actions with labels,
+verdicts, rule decisions, approval request and hash, and what executed. A run
+that reaches execution also writes a "decided" row first, before any effect
+(Gate 2 review #5).
 """
 
 import json
@@ -32,7 +34,10 @@ def _audit(env: Environment) -> list[dict[str, Any]]:
 def test_each_run_writes_one_explanatory_audit_row() -> None:
     env = _env()
     result = run_plan(refund_from_ticket_text(CASE_TICKET), env, run_id="r-1")
-    [row] = _audit(env)
+    decided, row = _audit(env)
+    assert (decided["phase"], row["phase"]) == ("decided", "final")
+    assert decided["outcome"] == "executing" and decided["executed"] == []
+    assert decided["rules"] == row["rules"] and decided["actions"] == row["actions"]
     assert row["run_id"] == "r-1" and row["outcome"] == result.outcome == "executed"
     [action] = row["actions"]
     assert action["tool"] == "issue_refund" and action["args"]["order_id"] == 7000
@@ -67,7 +72,7 @@ def test_run_task_uses_a_fresh_run_id_and_records_the_planner_input() -> None:
     a = run_task("T", "refund 7000", OraclePlanner(plan), env_a)
     b = run_task("T", "refund 7000", OraclePlanner(plan), env_b)
     assert a.run_id != b.run_id and a.run_id != "T"
-    [row] = _audit(env_a)
+    [row] = [r for r in _audit(env_a) if r["phase"] == "final"]
     assert row["planner_input_hash"] == a.planner_input_hash is not None
     assert row["task_id"] == "T"
 

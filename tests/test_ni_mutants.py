@@ -21,6 +21,7 @@ import kernel.tools.database
 from kernel.labels import BOTTOM, Label
 from kernel.tools.database import TrustedReader
 from tests.ni_properties import NIViolation
+from tests.test_approval_binding import ni5_property
 from tests.test_noninterference import multirun_property, ni_property
 
 
@@ -65,6 +66,9 @@ def _never(self: Any, *args: Any) -> bool:
     return False
 
 
+# Examples per mutant. The rarest fires about once per 310 examples (measured
+# 2026-10-30, D-049), so 600 left too little margin; a caught mutant stops early.
+NI_BUDGET = 3000
 MUTANTS: dict[str, tuple[Any, str, Any]] = {
     "filter ignores predicate labels": (
         kernel.interpreter,
@@ -103,7 +107,12 @@ MUTANTS: dict[str, tuple[Any, str, Any]] = {
         "ticket_goodwill_credit",
         _goodwill_ignores_amount,
     ),
+    # Gate 2 review findings 1-2: extraction under untrusted control.
+    "extraction ignores control": (kernel.interpreter, "EXTRACTION_FOLLOWS_CONTROL", False),
 }
+# The rarest multirun mutant fires about once per 330 examples (measured 2026-10-30,
+# D-049); at 600 examples one was missed by chance.
+MULTIRUN_BUDGET = 3000
 MULTIRUN_MUTANTS: dict[str, tuple[Any, str, Any]] = {
     "ownership rule drops once-per-ticket across runs": (
         TrustedReader,
@@ -111,6 +120,7 @@ MULTIRUN_MUTANTS: dict[str, tuple[Any, str, Any]] = {
         _never,
     ),
     "ownership rule drops never-refunded order": (TrustedReader, "order_has_refund", _never),
+    "goodwill rule drops the per-customer bound": (TrustedReader, "customer_has_credit", _never),
     "execution writes no record before the provider call": (
         kernel.execution,
         "PENDING_FIRST",
@@ -139,7 +149,7 @@ def test_ni_harness_catches_mutant(name: str, monkeypatch: pytest.MonkeyPatch) -
     module, attribute, replacement = MUTANTS[name]
     monkeypatch.setattr(module, attribute, replacement)
     with pytest.raises(NIViolation):
-        _run_property(600)()
+        _run_property(NI_BUDGET)()
 
 
 @pytest.mark.parametrize("name", sorted(MULTIRUN_MUTANTS))
@@ -147,4 +157,26 @@ def test_multirun_harness_catches_mutant(name: str, monkeypatch: pytest.MonkeyPa
     module, attribute, replacement = MULTIRUN_MUTANTS[name]
     monkeypatch.setattr(module, attribute, replacement)
     with pytest.raises(NIViolation):
-        _run_property(600, multirun_property)()
+        _run_property(MULTIRUN_BUDGET, multirun_property)()
+
+
+# Gate 2 review finding 4: an approved set must not stop because its own effects
+# relaxed a later verdict (NEEDS_APPROVAL -> ALLOW). Reversing the order makes
+# relaxation count as stricter, which is the behaviour the reviewer found.
+# About 1 detection in 180 examples (D-049); NI-5 runs are cheap.
+NI5_BUDGET = 2000
+NI5_MUTANTS: dict[str, tuple[Any, str, Any]] = {
+    "re-check treats a relaxed verdict as stricter": (
+        kernel.execution,
+        "_STRICTNESS",
+        {"ALLOW": 2, "NEEDS_APPROVAL": 1, "BLOCK": 0},
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(NI5_MUTANTS))
+def test_ni5_harness_catches_mutant(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    module, attribute, replacement = NI5_MUTANTS[name]
+    monkeypatch.setattr(module, attribute, replacement)
+    with pytest.raises(NIViolation):
+        _run_property(NI5_BUDGET, ni5_property)()

@@ -37,9 +37,13 @@ Two properties make the guarantee planner-independent:
 1. **Isolation by construction.** The *kernel* invokes the planner through a `Planner`
    protocol, with an input it builds itself. In the standard configuration that input is the
    operator request and the tool signatures only. The kernel logs a hash of the input, computes
-   the plan label from it (§8), and accepts exactly one plan per task id. Nothing computed
-   during a run flows back to the planner (no re-planning, §8), and no caller-side retry loop
-   can re-sample plans after seeing outcomes (review finding 8).
+   the plan label from it (§8), and accepts exactly one plan per task id. The task id is
+   recorded in the audit table, so the limit holds across `Environment` objects and restarts
+   over the same database (Gate 2 review #7). Nothing computed during a run flows back to the
+   planner (no re-planning, §8), and no caller-side retry loop can re-sample plans after seeing
+   outcomes (review finding 8). `run_plan`, which takes a plan and a plan label directly, is for
+   the trusted composition root and the tests; a caller that passes a trusted label for a plan
+   built from untrusted text is outside the TCB's guarantee.
 2. **Enforcement on provenance, not intent.** Every decision is a function of labels computed by
    the kernel from where data came from, never of what the planner meant.
 
@@ -152,11 +156,17 @@ making the ticket's own identity untrusted.
 - Operators other than `len`/`at`/`contains` accept scalars only; `min`/`max` are binary.
 
 **The extractor** is modelled as an *arbitrary* function from untrusted text to typed values, so
-its correctness is irrelevant to safety. Its output label is its input label joined with the
-labels of every text already passed to the extractor in the same run, whatever it returns
-(Gate 1 review #4). That makes state carried *within* a run harmless. State carried *across*
-runs (a cache, reused KV state) is not covered by labels, so the contract still requires
-statelessness, and it is enforced only by review and, in Phase 4, by a test of the LLM adapter:
+its correctness is irrelevant to safety. Its output label joins, whatever it returns, the
+input text's label, the `pc` of the call, and the text label and `pc` of every extraction
+already made in the same run (Gate 1 review #4, Gate 2 review #1). The `pc` matters because an
+extractor can carry state other than the texts it saw, such as a call counter: how many
+extractions ran under an untrusted `pc` is untrusted. Entering a `map` whose body syntactically
+contains an extraction joins the body's `pc` into the cumulative label before the first
+iteration, even when there are none (Gate 2 review #2), so whether a later extraction is
+trusted is fixed by syntax (§3.3). Together these make state carried *within* a run harmless:
+its texts, their order and the number of calls are all covered. State carried *across* runs (a
+cache, reused KV state) is not covered by labels, so the contract still requires statelessness,
+and it is enforced only by review and, in Phase 4, by a test of the LLM adapter:
 - **Stateless per call.** No shared context, cache, or KV state across calls, and no run-wide
   budgets.
 - **Bounded per call.** A deterministic per-call limit, in tokens rather than wall-clock time.
@@ -225,6 +235,12 @@ Stated precisely (review finding 12): **whether a value's `U` is empty** is dete
 plan's syntax and the labels of trusted inputs, never by untrusted values. Every rule above is a
 join chosen by syntax. Data-dependent evaluation (number of iterations, filter outcomes) only
 happens under a `pc`, or inside a structure label, that already carries the data it depends on.
+
+The extractor's cumulative label was the one place this failed (Gate 2 review #2): it joined
+only the extractions that actually ran, so a `map` over an untrusted selection that ran zero
+times left a later extraction of a literal trusted, and one that ran left it untrusted. The
+pre-join in §3 restores the lemma: the cumulative label depends on which `map` bodies contain
+an extraction, which is syntax.
 
 The *contents* of `U` (which origins, and whether it collapsed to `★`) may depend on values,
 because origins name row keys. That affects only which rules can apply, and rules report
@@ -323,11 +339,19 @@ A run has four phases. Nothing consequential happens before phase 4.
    - otherwise → one approval request for the whole of `A`; execute `A` only if approved and
      the hash matches (§7).
 4. **Execute:** thin execution layer (§10), in plan order (D-022).
+   - The decision (actions, verdicts, rule decisions, approval) is committed to the audit log
+     as a `decided` row before the first effect (Gate 2 review #5).
    - Before the first effect, the kernel re-runs every action's full policy, including rule
-     admission, against current state. Any divergence aborts the run with nothing executed.
-   - Between effects, each action is re-checked again. A divergence there needs a writer other
-     than the kernel; if one occurs, the run stops and the executed prefix is reported as
-     *partial*. Payments cannot be rolled back, so a partial run is surfaced, never hidden.
+     admission, against current state. Any divergence, stricter or more permissive, aborts the
+     run with nothing executed: the state changed after the decision or the approval was
+     made (Gate 2 review #4).
+   - Between effects, each action is re-checked again, and the run stops only if its verdict
+     became *stricter*. A change there can come from another writer or from the set's own
+     earlier effects. A set's own effects can also *relax* a later verdict: a trusted full
+     refund of one order can make another order the customer's unique eligible one, turning
+     NEEDS_APPROVAL into ALLOW. That is not a reason to stop an approved set, so a relaxation
+     is ignored (Gate 2 review #4). On a stop, the executed prefix is reported as *partial*.
+     Payments cannot be rolled back, so a partial run is surfaced, never hidden.
 
 The same structure is used in every mode, so the non-interference harness observes exactly what
 production would do.
@@ -408,8 +432,13 @@ Every rule documents:
   test-side code written independently of the kernel;
 - residual risk, plus admit, reject and residual-risk tests.
 
-Every consultation is logged: rule, site, the components and origins considered, the predicate
-inputs read, the outcome, and (if admitted) the canonical admitted action.
+Every consultation is logged in the run's audit row: rule, site, outcome and the reason (which
+names the first failing predicate). The same row holds each action's canonical arguments and the
+untrusted origins of each component, so the components and origins a rule considered can be
+read from it. The predicate inputs (the trusted rows read) are not logged; the trace shows the
+decision, not a replay of it. Each run writes a `decided` row before its first effect and a
+`final` row with the outcome; recovery of pending refunds writes its own `recover` rows
+(Gate 2 review #5).
 
 Because endorsement is per action, an endorsed value can never become the condition of a
 `filter` that selects a *different* action, and cannot be stored and reused as trusted, except
@@ -476,12 +505,16 @@ authority (`incident_orders`).
 - **Admits** when `ticket_id`, `amount` and `reason` are trusted; every untrusted origin of any
   component (including `pc`) is in `Ω_T = {tickets[T].subject, tickets[T].body, tickets[T].@row}`;
   the customer is `T`'s customer; the amount is `GOODWILL_AMOUNT` (10,000 paise); no other
-  credit for `T` is in `A`; and `T` has never had a credit.
+  credit for `T`, or for that customer, is in `A`; `T` has never had a credit; and the customer
+  has never had a credit.
 - **One sentence:** *ticket text may trigger the standard goodwill credit to that ticket's own
-  customer, once per ticket.*
+  customer, once per ticket and once per customer.*
+- **Why per customer** (Gate 2 review #6): customers open tickets freely (§2.1), so a bound per
+  ticket alone is no bound per customer: four tickets gave four automatic credits. Later credits
+  for the same customer need approval.
 - **Release:** one bit per ticket, whether the rule admits; projection `(rule, site, outcome)`.
 - **Postcondition** (NI-4): credit to `T`'s customer, for the standard amount, with an allowed
-  reason, the only credit ever for `T`.
+  reason, the only credit ever for `T` and for that customer.
 - **Residual risk:** triggering or suppression of the standard credit, as for F-1. Never
   redirection or a different amount.
 
@@ -564,8 +597,10 @@ An environment `E = (DB, clock, provider)`.
 
 Extractor outputs are part of the untrusted environment. The harness uses a "raw" extractor
 whose output is an arbitrary function of the text, so the property covers every *stateless*
-extractor. Extractors with memory are covered within a run by the cumulative label (§3) and a
-regression test, not by the fuzzer.
+extractor. In a third of examples each run instead gets a fresh *counting* extractor, whose
+output for token-free text depends on the parity of its call count. That samples extractors
+with within-run memory; it does not cover all of them. The argument for all of them is the
+cumulative label (§3).
 
 ### 9.2 Observations of a run of plan `P` in `E` with approver `Ap`
 
@@ -614,13 +649,22 @@ exception in either run fails the test.
 
 ### 9.4 Harness
 
-- Plans are generated *type-directed* from the tool registry, so most are well-typed; random
-  JSON would almost never pass the checker.
-- Adversarial generators produce the known laundering shapes: selection by a tainted predicate,
-  tainted `at` indices, `len` of tainted lists, money arithmetic on tainted values, nested
-  `map`/`filter`, and calls inside tainted `map` bodies with all-literal arguments.
-- Environment mutations rewrite untrusted cells, add a ticket opened by another customer, or
-  delete the case ticket. Their values are drawn to be dangerous: IDs of the same
+- Plans are compositions of hand-written shapes, not generated from the registry's types
+  (Gate 2 review #3). Amounts and predicates inside the shapes come from a small type-directed
+  expression generator. Every generated plan passes the checker. The guarantee covers every
+  well-typed plan; the fuzzer samples only the shapes listed here, so a passing fuzz run is
+  evidence about these shapes and nothing else.
+- The shapes are the known laundering patterns: selection by a tainted predicate, tainted `at`
+  indices, `len` of tainted lists, money arithmetic on tainted values, nested `map`/`filter`,
+  calls inside tainted `map` bodies with all-literal arguments, credits and closures under a
+  ticket read or triggered by order notes, and selection by the ticket's `status` or
+  `subject`. Added after the Gate 2 review: extraction from literal text after a `map` that
+  extracts under a note- or existence-selected `pc`; a trusted refund on the case customer's
+  second ticket followed by rule-path refunds on the case ticket; `order_stats` in `pc` and
+  arguments; and `incident_orders` under a trusted `pc` and under a ticket read.
+- Environment mutations rewrite untrusted cells, add a ticket opened by another customer, add
+  a second ticket for the case customer, or delete the case ticket. `customers.display_name`
+  is mutated, but no tool reads it, so those mutations have no effect. Their values are drawn to be dangerous: IDs of the same
   customer's other orders, other customers' orders, duplicates, empty lists, the maximum list
   length, extreme integers, and invalid UTF-8.
 - A multi-run property runs two plans on one evolving environment. A provider failure may be
@@ -628,9 +672,12 @@ exception in either run fails the test.
   a new ticket. NI-2 and NI-4 (with its cross-run postconditions) are checked on both runs, and
   no order may be refunded more than was paid.
 - Mutant tests break one mechanism each (four label rules, the pc component, rule uniqueness,
-  the rule's origin set, once-per-ticket, never-refunded, record-before-call) and require the
-  harness to fail.
-- `make check` runs a derandomized profile; `make fuzz` runs the `fuzz` profile. Shrunk
+  the rule's origin set, once-per-ticket, never-refunded, record-before-call, the existence
+  taint, the goodwill rule's origins, amount and per-customer bound, extraction under control,
+  and the execution re-check's direction) and require the harness to fail. The execution
+  pre-pass has no mutant: the harness has no concurrent writer, so it is covered by regression
+  tests only.
+- `tasks.py check` runs a derandomized profile; `tasks.py fuzz` runs the `fuzz` profile. Shrunk
   counterexamples become `@example` regression tests.
 
 ---

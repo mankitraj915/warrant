@@ -164,7 +164,11 @@ def _ni5(plan: Json, world: World) -> RunResult:
     return r
 
 
-@given(st.data())
-def test_ni5_executed_set_is_the_approved_set(data: Any) -> None:
+def ni5_property(data: Any) -> None:
     world = data.draw(worlds(), label="world")
     _ni5(data.draw(plans(world), label="plan"), data.draw(mutated(world), label="E"))
+
+
+@given(st.data())
+def test_ni5_executed_set_is_the_approved_set(data: Any) -> None:
+    ni5_property(data)

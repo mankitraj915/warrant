@@ -971,3 +971,204 @@ Commands: `tasks.py eval --suite holdout` (2,112 runs; dev user tasks × holdout
   for no cap down to ₹500, 0/488 at ₹250 and 0; burden 5 → 15 of 40; steering 2 → 9 of 488.
   Same shape as the dev curve (D-042), for the same reason (the two triggerable orders are
   ₹270 and ₹330).
+
+## Gate 2 review (2026-10-30)
+
+An independent reviewer subagent got THREAT_MODEL.md, DESIGN.md and the code at fc55a2c
+(`docs/reviews/GATE2_REVIEW.md`, Part 1 verbatim). It reported seven findings. D-044 to D-049
+record the response to each. Every probe is now a regression test in
+`tests/test_gate2_regressions.py`, and each test fails on fc55a2c.
+
+Before the review, the chunked fuzz at fc55a2c (`tasks.py fuzz-chunks`, 20 chunks × 1,000,
+seeds recorded in `results/fuzz_chunks.jsonl`) passed 20,000 examples with 0 failures for each
+of the three properties:
+
+| property | invalid | peak RSS | time |
+|---|---|---|---|
+| `test_noninterference` | 691 | 92.3 MB | 309 s |
+| multirun | 2,433 | 91.6 MB | 256 s |
+| NI-5 | 1,414 | 81.5 MB | 199 s |
+
+The fuzz could not have found findings 1, 2 or 4, because its generator never produced
+those plan shapes (finding 3). The result is evidence about the shapes it sampled, nothing
+more.
+
+## D-044 Extraction labels follow control (Gate 2 findings 1 and 2)
+
+**Finding.** The cumulative extraction label joined only the *text* labels of earlier
+extractions. An extraction of a literal under a note-selected `pc` added nothing, so an
+extractor that counts its calls could let order-note text choose a "trusted" refund target
+(finding 1: an invariant violation, given an extractor with within-run state). With a
+stateless extractor, whether a later literal extraction was trusted depended on whether an
+untrusted filter let an earlier extraction run (finding 2: NI-1 counterexample).
+
+**Decision.** Fix (b) from the review:
+- every extraction joins `join(text label, pc)` into the cumulative label;
+- entering a `map` whose body syntactically contains an extraction joins the body `pc` into the
+  cumulative label before iterating, including for zero iterations.
+
+That makes the cumulative label's trust a function of syntax again (DESIGN §3.3). The switch
+`kernel.interpreter.EXTRACTION_FOLLOWS_CONTROL` exists only for the mutant test.
+
+**Rejected:**
+- *(a) Structural statelessness: a fresh extractor instance or subprocess per call.* That
+  closes finding 1 only for extractors we construct. It does nothing for finding 2, which
+  occurs with a stateless extractor. A per-call subprocess for the Phase 4 local model would
+  reload the model per call, which is not workable on 8 GB.
+- *Join `pc` but skip the pre-join.* Finding 2 would remain: zero iterations would still leave
+  the label trusted.
+
+**Cost.** Any extraction after a `map` that extracts under an untrusted `pc` is now untrusted,
+including extractions of literals. The effect on the evaluation is measured in D-050.
+
+## D-045 Execution: pre-pass, then a re-check that stops only on a stricter verdict (finding 4)
+
+**Finding.** The in-run re-check compared verdict kinds for equality. An approved set's own
+first effect could relax a later verdict. Example: a trusted full refund of 7000 leaves 7001
+the unique eligible order, so NEEDS_APPROVAL becomes ALLOW. The set then stopped as `partial`,
+which fails NI-5. Separately, there was no re-check of all actions before the first effect,
+which DESIGN §5 claimed.
+
+**Decision.**
+- Before the first effect, re-decide every action against current state, and abort with
+  nothing executed on any divergence, in either direction.
+- Between effects, stop (`partial`) only if an action's verdict became stricter
+  (ALLOW < NEEDS_APPROVAL < BLOCK).
+
+A relaxation is safe to ignore. The set was authorised at decision time, by ALLOW or by an
+approval of its exact hash. The pre-pass confirms that nothing changed before the first
+effect. A later verdict that is more permissive cannot authorise anything outside that set.
+
+**Rejected.** *Re-decide later actions against the pre-run snapshot plus the expected effects
+of earlier ones.* That reimplements effect semantics inside the policy path, in what should be
+a thin execution layer (CLAUDE.md), for no extra safety over the monotone rule.
+
+**Coverage.** NI-5 now catches a mutant that reverses the strictness order. The pre-pass has no
+mutant: the NI harness has no concurrent writer. It is covered by probe D and
+`test_state_change_while_deciding_aborts`.
+
+## D-046 Write-ahead audit (finding 5)
+
+**Finding.** The audit row was written after execution. A crash after the provider committed a
+rule-admitted refund left no record of the admitting decision. The crashed run id was also not
+marked used.
+
+**Decision.**
+- `run_plan` commits a `decided` row (actions, component origins, verdicts, rule decisions,
+  approval, outcome `executing`) before the first effect, and a `final` row after.
+- `recover` writes a `recover` row for every pending refund it reconciles.
+- Run-id reuse is checked against the audit table, so a run with a `decided` row stays used.
+- `tasks.py trace` shows the latest row for a run and notes when only the `decided` row
+  exists.
+
+**Rejected:**
+- *Write the decision row in the same transaction as the first pending refund.* That is no
+  safer: the separate commit comes earlier, and it also covers runs whose first effect is a
+  local write.
+- *Log the trusted rows each predicate read.* That is a new feature. DESIGN §6.1 now says what
+  the log holds: the reason string names the first failing predicate, and the log is not a
+  replay.
+
+Decisions re-made at execution time are not logged separately. Under D-045 they either equal
+the logged decision (pre-pass) or stop the run, which the `final` row records.
+
+## D-047 Goodwill credit bounded per customer (finding 6)
+
+**Finding.** The goodwill rule was bounded per ticket only. Customers open tickets freely, so
+one customer with four tickets got four automatic credits. DESIGN §2.1 promised per-customer
+scoping.
+
+**Decision.**
+- The rule also requires that the customer has never had a credit, and that no other credit
+  for that customer is in the action set (`TrustedReader.customer_has_credit`).
+- NI-4's goodwill postcondition adds "customer already had a credit".
+- A multirun mutant drops the bound and is caught.
+
+**Rejected:**
+- *A time window* (one credit per customer per N days): a parameter with no data to set it.
+  "Ever" is the strictest bound and the simplest to state.
+- *Only document the per-ticket bound:* the design already promised more.
+
+**Cost.** A customer's second and later goodwill credits need approval. The effect on the
+evaluation is measured in D-050.
+
+## D-048 One plan per task id is durable (finding 7)
+
+**Finding.** `Environment.planned_tasks` was in memory only. A second `Environment` over the
+same database planned the same task id again.
+
+**Decision.** `run_task` also refuses a task id that already appears in the audit table
+(`json_extract(record, '$.task_id')`), and audits the refusal. DESIGN §1 now also says that
+`run_plan`, which takes a plan label directly, is for the trusted composition root and tests.
+
+**Rejected:** *A new `planned_tasks` table.* That is a schema change for information the audit
+table already holds. The lookup is an unindexed scan of the audit table. That is fine at
+evaluation scale (thousands of rows), and an expression index can be added if it ever matters.
+
+## D-049 NI harness breadth (finding 3)
+
+**Finding.** The generator was a fixed list of shapes that could not produce findings 1, 2 or
+4. DESIGN §9.4 called it "type-directed".
+
+**Decision.** Add the missing shapes rather than write a registry-type-directed generator. The
+shapes target specific mechanisms, while random well-typed plans mostly read data and do
+nothing consequential. DESIGN §9.4 now describes the generator as it is.
+- **Plan shapes** (`planners/fuzz.py`):
+  - extraction from a literal, after a `map` that extracts under a note- or existence-selected
+    `pc`;
+  - a trusted refund on the case customer's second ticket (4005), followed by rule-path
+    refunds on the case ticket;
+  - `order_stats` in `pc` and in arguments;
+  - `incident_orders` under a trusted `pc` and under a ticket read;
+  - selection by ticket `status` or `subject`.
+
+  Incident ids are typed `Id[Incident]`, so extracted order ids cannot select one (the
+  checker rejects it).
+- **Worlds and mutations:** worlds may include ticket 4005 and always include incident 90.
+  Mutations may open 4005.
+- **Extractor:** in a third of `ni_property` examples, each run gets a fresh
+  `counting_extractor`, whose output for token-free text depends on its call count.
+- **Multirun:** the first run can also refund part of 7000 (kind `partial`).
+- **New mutants:**
+  - extraction ignores control (NI-1/NI-3);
+  - the re-check treats a relaxation as stricter (NI-5);
+  - the goodwill per-customer bound is dropped (multirun).
+
+  The extraction and NI-5 mutants were added first, and the old generator did not catch them
+  at 600 examples. The new shapes catch them.
+
+**Finding: mutant budgets were too small.** The multirun "never-refunded order" mutant escaped
+at 600 examples after an unrelated change shifted Hypothesis's draws. Detection is rare per
+example, so 600 left little margin. I measured each mutant's detection rate (examples in which
+an NI check fails, derandomized, 1,500 requested examples) and set the budgets from the rates.
+A caught mutant stops at its first counterexample, so only rare mutants cost more time.
+
+| property | mutant | examples with a violation |
+|---|---|---|
+| NI (single run) | policy ignores pc | 180 / 1,552 |
+| NI | map body pc ignores list structure | 126 / 1,552 |
+| NI | point ticket read drops existence origin | 110 / 1,552 |
+| NI | extractor output labelled trusted | 100 / 1,552 |
+| NI | at ignores index label | 31 / 1,552 |
+| NI | filter ignores predicate labels | 31 / 1,552 |
+| NI | ownership rule drops uniqueness | 25 / 1,552 |
+| NI | ownership rule ignores origin set | 15 / 1,552 |
+| NI | extraction ignores control (new) | 11 / 1,552 |
+| NI | goodwill rule ignores amount | 7 / 1,552 |
+| NI | goodwill rule ignores origin set | 5 / 1,552 |
+| multirun | goodwill rule drops the per-customer bound (new) | 80 / 1,670 |
+| multirun | ownership rule drops never-refunded order | 28 / 1,670 |
+| multirun | execution writes no record before the provider call | 17 / 1,670 |
+| multirun | ownership rule drops once-per-ticket across runs | 5 / 1,670 |
+| NI-5 | re-check treats a relaxed verdict as stricter (new) | 9 / 1,602 |
+
+The rarest mutants fire about once per 310–330 examples. Budgets: 3,000 single-run and
+multirun, 2,000 NI-5 (about 10, 9 and 11 expected detections). The multirun rates are after
+adding the `partial` first-run kind. Before it, "never-refunded order" fired in 2 of 1,676.
+
+Commands: `scratchpad/rate1.py` and `rate.py` (not in the repository) wrapped `ni_property`,
+`multirun_property` and `ni5_property` with each mutant applied, counting `NIViolation`s
+instead of stopping.
+
+**Not covered.** `customers.display_name` is mutated, but no tool reads it, so those mutations
+do nothing. The execution pre-pass has no mutant (D-045).

@@ -19,6 +19,7 @@ import sqlite3
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from functools import partial
 from typing import Any, Literal, Protocol
 
 from .approval import Approval, Approver, DenyAll, canonical_set, digest
@@ -42,6 +43,7 @@ Outcome = Literal[
     "aborted",
     "partial",
     "indeterminate",
+    "executing",  # only in the write-ahead "decided" audit row
 ]
 
 
@@ -76,8 +78,17 @@ def _origins(label: Label) -> list[str] | str:
     return STAR if STAR in label.untrusted else sorted(label.untrusted)
 
 
-def _audit(db: sqlite3.Connection, r: RunResult, raw_plan: Any, task_id: str | None) -> RunResult:
+def _audit(
+    db: sqlite3.Connection,
+    r: RunResult,
+    raw_plan: Any,
+    task_id: str | None,
+    phase: str = "final",
+) -> RunResult:
+    """Append one audit row. ``phase`` is "decided" for the write-ahead row committed
+    before the first effect, "final" for the outcome (Gate 2 review #5)."""
     record = {
+        "phase": phase,
         "task_id": task_id,
         "outcome": r.outcome,
         "reason": r.reason,
@@ -133,13 +144,19 @@ def run_plan(
     if env.db.execute("SELECT 1 FROM audit WHERE run_id = ?", (run_id,)).fetchone():
         result = RunResult(run_id, "rejected", "run_id already used; run ids are single-use")
     else:
-        result = _decide_and_execute(raw_plan, env, run_id, plan_label)
+        audit = partial(_audit, raw_plan=raw_plan, task_id=task_id)
+        result = _decide_and_execute(raw_plan, env, run_id, plan_label, audit, planner_input_hash)
     result = replace(result, planner_input_hash=planner_input_hash)
     return _audit(env.db, result, raw_plan, task_id)
 
 
 def _decide_and_execute(
-    raw_plan: Any, env: Environment, run_id: str, plan_label: Label
+    raw_plan: Any,
+    env: Environment,
+    run_id: str,
+    plan_label: Label,
+    audit: Callable[..., RunResult],
+    planner_input_hash: str | None,
 ) -> RunResult:
     try:
         plan = parse_plan(raw_plan)
@@ -184,6 +201,10 @@ def _decide_and_execute(
         if problem is not None:
             return replace(result, outcome="approval_invalid", reason=problem)
         result = replace(result, approved=True)
+    # Write ahead: the decision (verdicts, rule decisions, approval) is durable
+    # before any effect, so a crash cannot move money under an unlogged decision.
+    decided = replace(result, outcome="executing", planner_input_hash=planner_input_hash)
+    audit(env.db, decided, phase="decided")
     outcome, done = execute(actions, verdicts, env.db, env.provider)
     return replace(result, outcome=outcome, reason=outcome, executed=tuple(done))
 
@@ -241,7 +262,10 @@ def run_task(
     label, which literals and the root pc inherit, becomes as untrusted as they are.
     """
     run_id = run_id or str(uuid.uuid4())
-    if task_id in env.planned_tasks:
+    planned = env.db.execute(
+        "SELECT 1 FROM audit WHERE json_extract(record, '$.task_id') = ?", (task_id,)
+    ).fetchone()
+    if task_id in env.planned_tasks or planned:  # durable across Environments (Gate 2 #7)
         refused = RunResult(run_id, "rejected", "task already planned; re-planning is forbidden")
         return _audit(env.db, refused, None, task_id)
     env.planned_tasks.add(task_id)

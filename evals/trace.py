@@ -47,11 +47,17 @@ def _origins(origins: list[str] | str) -> str:
 
 
 def render(db: sqlite3.Connection, run_id: str) -> str:
-    row = db.execute("SELECT record FROM audit WHERE run_id = ?", (run_id,)).fetchone()
+    # The latest row: the final outcome, or the write-ahead "decided" row of a run
+    # that crashed during execution.
+    row = db.execute(
+        "SELECT record FROM audit WHERE run_id = ? ORDER BY id DESC LIMIT 1", (run_id,)
+    ).fetchone()
     if row is None:
         return f"no audit record for run {run_id}"
     r = json.loads(row[0])
     lines = [f"run {run_id}: {r['outcome']}" + (f" ({r['reason']})" if r["reason"] else "")]
+    if r.get("phase") == "decided":
+        lines.append("(no final row: the run stopped during execution; this is its decision)")
     if r.get("task_id"):
         lines.append(f"task: {r['task_id']}")
     lines.append(f"planner input hash: {r['planner_input_hash']}")

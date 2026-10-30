@@ -1,10 +1,13 @@
 """Thin execution layer (DESIGN §10, D-022).
 
-Each action is re-decided (in the context of the whole set) against current
-state immediately before it runs; a divergence before the first effect aborts
-the run, a later one stops it as partial. Refunds use the business idempotency
-key ``refund:{order}:{ticket}`` and the provider is asked for the key's status
-before any call.
+Before the first effect every action is re-decided (in the context of the
+whole set) against current state, and any divergence aborts the run with
+nothing executed. During execution the run's own earlier effects change state
+legitimately (a refund can make another order the unique eligible one), so
+each later action is re-decided again just before it runs and stops the run
+as partial only if its verdict became *stricter* (Gate 2 review #4). Refunds
+use the business idempotency key ``refund:{order}:{ticket}`` and the provider
+is asked for the key's status before any call.
 
 A refund row is written as ``pending`` *before* the provider call and counts as
 refunded for every policy read, so a provider failure can never leave money
@@ -16,6 +19,7 @@ pending, by provider status, at the start of every run
 (tests/test_execution_recovery.py injects the crash).
 """
 
+import json
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -88,16 +92,26 @@ def recover(db: sqlite3.Connection, provider: PaymentProvider) -> None:
     pending = db.execute(
         "SELECT idempotency_key FROM refunds WHERE provider_ref = ?", (PENDING,)
     ).fetchall()
+    reconciled: list[dict[str, str | None]] = []
     for (key,) in pending:
         try:
             ref = provider.status(key)
         except Exception:
+            reconciled.append({"key": key, "result": "unknown; left pending"})
             continue
         if ref is None:
             db.execute("DELETE FROM refunds WHERE idempotency_key = ?", (key,))
+            reconciled.append({"key": key, "result": "not at provider; removed"})
         else:
             db.execute("UPDATE refunds SET provider_ref = ? WHERE idempotency_key = ?", (ref, key))
+            reconciled.append({"key": key, "result": f"committed at provider as {ref}"})
+    if reconciled:  # every reconciliation is audited (Gate 2 review #5)
+        record = json.dumps({"phase": "recover", "reconciled": reconciled}, sort_keys=True)
+        db.execute("INSERT INTO audit (run_id, record) VALUES ('recover', ?)", (record,))
     db.commit()
+
+
+_STRICTNESS = {"ALLOW": 0, "NEEDS_APPROVAL": 1, "BLOCK": 2}
 
 
 def execute(
@@ -106,11 +120,16 @@ def execute(
     db: sqlite3.Connection,
     provider: PaymentProvider,
 ) -> tuple[Outcome, list[Executed]]:
-    done: list[Executed] = []
     for action, decided in zip(actions, verdicts, strict=True):
         now, _ = decide_one(action, actions, TrustedReader(db))
         if now.kind != decided.kind:
-            return ("partial" if done else "aborted"), done
+            return "aborted", []
+    done: list[Executed] = []
+    for action, decided in zip(actions, verdicts, strict=True):
+        if done:
+            now, _ = decide_one(action, actions, TrustedReader(db))
+            if _STRICTNESS[now.kind] > _STRICTNESS[decided.kind]:
+                return "partial", done
         if action.tool != "issue_refund":
             local = _execute_local(action, db)
             if local is None:

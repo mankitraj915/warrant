@@ -28,11 +28,13 @@ from itertools import count
 
 from hypothesis import strategies as st
 
-from domain.seed import Customer, Order, Payment, Text, Ticket, World, generate
+from domain.seed import Customer, Incident, Order, Payment, Text, Ticket, World, generate
 from planners.builders import Json, call, expr, filter_, lit, map_, op, plan, ref
 
 CASE_CUSTOMER, OTHER_CUSTOMER, CASE_TICKET = 100, 101, 4000
 PROBE_TICKET = 4001  # a ticket id another customer may or may not have opened
+SECOND_TICKET = 4005  # a second ticket of the case customer (Gate 2 review #3, #4)
+INCIDENT = 90  # a staff-written incident covering one case order and one other
 UNTRUSTED_CELLS = (
     ("tickets", "subject"),
     ("tickets", "body"),
@@ -46,6 +48,19 @@ def raw_extractor(text: str) -> list[object]:
     return [
         True if t == "TRUE" else False if t == "FALSE" else int(t) for t in _TOKEN.findall(text)
     ]
+
+
+def counting_extractor() -> Callable[[str], list[object]]:
+    """A stateful extractor (Gate 2 review #1, #3): text without tokens yields
+    7000 or 7001 by the parity of the call count, so how many extractions ran
+    earlier (possibly under untrusted control) chooses the output."""
+    calls = count()
+
+    def extract(text: str) -> list[object]:
+        n = next(calls)
+        return raw_extractor(text) or [7000 + n % 2]
+
+    return extract
 
 
 def _case_world(seed: int, second_status: str) -> World:
@@ -66,10 +81,23 @@ def _case_world(seed: int, second_status: str) -> World:
     )
 
 
+def _fuzz_world(seed: int, second_status: str, second_ticket: bool) -> World:
+    world = _case_world(seed, second_status)
+    world = world.extend(
+        incidents=(Incident(INCIDENT, "Courier delay", world.today - 1, (7000, 7100)),)
+    )
+    if second_ticket:
+        world = world.extend(tickets=(Ticket(SECOND_TICKET, CASE_CUSTOMER, "Late", "Order late"),))
+    return world
+
+
 def worlds() -> st.SearchStrategy[World]:
     # second_status "delivered" gives the case customer two eligible orders.
     return st.builds(
-        _case_world, st.integers(0, 2**16), st.sampled_from(["in_transit", "delivered"])
+        _fuzz_world,
+        st.integers(0, 2**16),
+        st.sampled_from(["in_transit", "delivered"]),
+        st.booleans(),
     )
 
 
@@ -98,12 +126,14 @@ def mutated(world: World) -> st.SearchStrategy[World]:
         st.sampled_from([("orders", o, "customer_note") for o in (7000, 7001)]),
         st.sampled_from(cells),
     )
-    rows = st.sampled_from(["same", "same", "same", "open_probe", "delete_case"])
+    rows = st.sampled_from(["same", "same", "same", "open_probe", "delete_case", "open_second"])
 
     def build(edits: list[tuple[tuple[str, int, str], Text]], row_change: str) -> World:
         w = world
         if row_change == "open_probe":
             w = w.extend(tickets=(Ticket(PROBE_TICKET, OTHER_CUSTOMER, "Hi", "Refund #7100"),))
+        if row_change == "open_second" and all(t.id != SECOND_TICKET for t in w.tickets):
+            w = w.extend(tickets=(Ticket(SECOND_TICKET, CASE_CUSTOMER, "Again", "Refund #7001"),))
         for (table, key, column), value in edits:
             if any(t.id == key for t in w.tickets) or table != "tickets":
                 w = w.replace_text(table, key, column, value)
@@ -160,7 +190,9 @@ def _predicate(draw: Draw, rec: str, oid_lists: list[Json], depth: int = 0) -> J
 def _ids(draw: Draw, world: World) -> tuple[int, int, int]:
     """Ticket, customer, order: usually coherent (the ticket's customer and one of
     their orders), sometimes arbitrary, so both allowed and blocked paths are hit."""
-    other_tickets = st.sampled_from([t.id for t in world.tickets] + [PROBE_TICKET])
+    other_tickets = st.sampled_from(
+        sorted({t.id for t in world.tickets} | {PROBE_TICKET, SECOND_TICKET})
+    )
     ticket = draw(st.one_of(st.just(CASE_TICKET), st.just(CASE_TICKET), other_tickets))
     owner = {t.id: t.customer_id for t in world.tickets}.get(ticket, OTHER_CUSTOMER)
     coherent = draw(st.sampled_from([True, True, True, False]))
@@ -202,6 +234,12 @@ def _shape(draw: Draw, world: World, n: _Names) -> list[Json]:
                 "credit",
                 "credit",
                 "close",
+                "lit_extract",
+                "lit_extract",
+                "two_tickets",
+                "two_tickets",
+                "aggregate",
+                "ticket_pred",
             ]
         )
     )
@@ -336,6 +374,56 @@ def _shape(draw: Draw, world: World, n: _Names) -> list[Json]:
                 )
             ),
         ]
+    if kind == "lit_extract":  # extraction from trusted text, after extraction under control
+        return _lit_extract(draw, n, t_id, c_id)
+    if kind == "two_tickets":  # a trusted action on the case customer's other ticket first
+        # Mostly a full refund of 7001: with both orders delivered it leaves 7000
+        # the unique eligible order mid-execution (Gate 2 review #4).
+        order, amount = draw(
+            st.sampled_from([(7001, 450_000), (7001, 450_000), (7000, 120_000), (7000, 10_000)])
+        )
+        other, x = 7001 if order == 7000 else 7000, n("x")
+        case_steps: list[Json] = [  # the other order, under the case ticket's pc only
+            call("compute_refund_amount", amt, order_id=lit(other)),
+            _refund(lit(CASE_TICKET), lit(other), ref(amt)),
+        ]
+        if draw(st.booleans()):  # or each order the case ticket's text names
+            each = map_(
+                ref(oids),
+                x,
+                call("compute_refund_amount", amt, order_id=ref(x)),
+                _refund(lit(CASE_TICKET), ref(x), ref(amt)),
+            )
+            case_steps = [extract, expr(each)]
+        return [
+            _refund(lit(SECOND_TICKET), lit(order), lit(amount)),
+            call("read_ticket", t, ticket_id=lit(CASE_TICKET)),
+            expr(map_(ref(t), tk, *case_steps)),
+        ]
+    if kind == "aggregate":  # order_stats (operator-only) and incident_orders
+        return _aggregate(draw, n, t_id, o_id, (read, t, tk, extract))
+    if kind == "ticket_pred":  # selection by the ticket's status or subject
+        sel, r, s = n("sel"), n("r"), n("s")
+        pred = draw(
+            st.sampled_from(
+                [
+                    op("eq", ref(r, "status"), lit("open")),
+                    op("ne", ref(r, "status"), lit("closed")),
+                    op("eq", ref(r, "subject"), lit("Refund")),
+                ]
+            )
+        )
+        credit = call(
+            "issue_credit",
+            ticket_id=ref(s, "id"),
+            customer_id=ref(s, "customer_id"),
+            amount=lit(10_000),
+            reason=lit("goodwill"),
+        )
+        close = call("close_ticket", ticket_id=ref(s, "id"), resolution=lit("refunded"))
+        refund = _refund(lit(t_id), lit(o_id), _amount(draw, []))
+        action = draw(st.sampled_from([refund, close, credit]))
+        return [read, expr(filter_(ref(t), r, pred), sel), expr(map_(ref(sel), s, action))]
     if kind == "probe":  # actions under a read of a ticket that may not exist
         probe = call("read_ticket", t, ticket_id=lit(PROBE_TICKET))
         return [probe, expr(map_(ref(t), tk, _refund(lit(t_id), lit(o_id), _amount(draw, []))))]
@@ -344,6 +432,78 @@ def _shape(draw: Draw, world: World, n: _Names) -> list[Json]:
         body = map_(ref(oids), x, _refund(t_arg, lit(o_id), _amount(draw, [])))
         return [read, expr(map_(ref(t), tk, extract, expr(body)))]
     return [_refund(lit(t_id), lit(o_id), _amount(draw, []))]  # trusted only
+
+
+def _lit_extract(draw: Draw, n: _Names, t_id: int, c_id: int) -> list[Json]:
+    """Extract from a literal, after an optional map whose iteration count is
+    selected by untrusted data (order notes, or whether a ticket row exists) and
+    whose body extracts (Gate 2 review #1, #2). With ``counting_extractor`` the
+    literal's result also depends on that count."""
+    ids, x, amt = n("ids"), n("x"), n("amt")
+    text = lit(draw(st.sampled_from(["noop", "please refund #7000", "#7001", "#7000 #7001"])))
+    prelude: list[Json] = []
+    control = draw(st.sampled_from(["none", "note", "note", "exists"]))
+    own_text = draw(st.booleans())
+    if control == "note":
+        orders, sel, f, s = n("orders"), n("sel"), n("f"), n("s")
+        junk = ref(s, "customer_note") if own_text else lit("noop")
+        go = op("eq", ref(f, "customer_note"), lit("go"))
+        pred = draw(st.sampled_from([go, op("ne", ref(f, "customer_note"), lit(""))]))
+        prelude = [
+            call("query_orders", orders, customer_id=lit(c_id)),
+            expr(filter_(ref(orders), f, pred), sel),
+            expr(map_(ref(sel), s, call("extract_order_ids", n("junk"), text=junk))),
+        ]
+    elif control == "exists":
+        t, tk = n("t"), n("tk")
+        junk = ref(tk, "body") if own_text else lit("noop")
+        prelude = [
+            call("read_ticket", t, ticket_id=lit(draw(st.sampled_from([PROBE_TICKET, t_id])))),
+            expr(map_(ref(t), tk, call("extract_order_ids", n("junk"), text=junk))),
+        ]
+    ticket = lit(draw(st.sampled_from([CASE_TICKET, t_id])))
+    amount = draw(st.sampled_from([ref(amt), lit(1)]))
+    return [
+        *prelude,
+        call("extract_order_ids", ids, text=text),
+        expr(
+            map_(
+                ref(ids),
+                x,
+                call("compute_refund_amount", amt, order_id=ref(x)),
+                _refund(ticket, ref(x), amount),
+            )
+        ),
+    ]
+
+
+def _aggregate(
+    draw: Draw, n: _Names, t_id: int, o_id: int, read_parts: tuple[Json, str, str, Json]
+) -> list[Json]:
+    """Aggregates in pc and arguments (P5 sinks), and incident order lists, read
+    with a trusted pc or under a ticket read (existence and text taint). Incident
+    ids are typed, so extracted order ids cannot select an incident."""
+    read, t, tk, extract = read_parts
+    use = draw(st.sampled_from(["stats_pc", "stats_arg", "incident", "incident_tainted"]))
+    stats, f, r, inc, x, amt = n("stats"), n("f"), n("r"), n("inc"), n("x"), n("amt")
+    if use in ("stats_pc", "stats_arg"):
+        amount = ref(r, "total") if use == "stats_arg" else _amount(draw, [])
+        target = _refund(lit(t_id), lit(o_id), op("min", amount, lit(1_000)))
+        delivered = filter_(ref(stats), f, op("eq", ref(f, "status"), lit("delivered")))
+        return [call("order_stats", stats), expr(map_(delivered, r, target))]
+    refund_each = map_(
+        ref(inc),
+        x,
+        call("compute_refund_amount", amt, order_id=ref(x, "id")),
+        _refund(lit(t_id), ref(x, "id"), ref(amt)),
+    )
+    if use == "incident":
+        return [call("incident_orders", inc, incident_id=lit(INCIDENT)), expr(refund_each)]
+    # Under the ticket read, optionally after extracting its text (map nesting is
+    # limited to 2): the refunds run once per ticket row that exists.
+    steps = [extract] if draw(st.booleans()) else []
+    incident = call("incident_orders", inc, incident_id=lit(INCIDENT))
+    return [read, expr(map_(ref(t), tk, *steps, incident, expr(refund_each)))]
 
 
 def _refund_rec(ticket_id: int, rec: str, draw: Draw) -> Json:
