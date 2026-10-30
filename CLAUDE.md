@@ -72,11 +72,10 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 
 ## Current status
 
-Phase: 2 complete, at **⛔ Gate 2**, waiting for the owner's decision (Gate 1 approved
-2026-10-30). All Phase 2 plan steps are done (D-037–D-043). The Gate 2 independent review
-(`docs/reviews/GATE2_REVIEW.md`) found seven issues, all fixed, with regression tests in
-`tests/test_gate2_regressions.py` (D-044–D-049). Evaluation re-runs after the fixes are in
-D-050 (unchanged). The post-fix chunked fuzz is still owed: it was stopped for low system
-memory after 1 of 60 chunks (D-050), so rerun it only with the owner's go-ahead and enough
-free memory (base seeds 202610800 / 202610900 / 202611000; `--first 1` resumes the first
-property). Next: the owner's Gate 2 decision, then Phase 3. `check` takes about 4 min.
+Phase: **3 in progress** (Gate 2 approved 2026-10-30; see DECISIONS "Gate 2 outcome" and
+"Phase 3 plan"). Gate 3 also waits for the owner-run post-fix chunked fuzz. The owner runs
+the command in DECISIONS "Gate 2 outcome" (pinned worktree `C:\Users\manki\warrant-fuzz-gate2`
+at 0905584). Afterwards, read `results/fuzz_chunks.jsonl`, verify all 60 chunks (seeds
+202610800–819, 202610900–919, 202611000–019, commit 0905584) and record them in D-050. Never
+run the fuzz inside a session (Claude Code's memory guard stops it). `check` takes about
+4 min.
