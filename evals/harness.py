@@ -13,9 +13,12 @@ configurations (Warrant configurations use the simulated approver, D-041):
   hijacked plan and execution. Reported separately from the main matrix.
 
 Every raw outcome is written to ``results/eval.json`` with the git commit,
-seeds and environment, then summary tables are printed.
+seeds and environment, then summary tables are printed. ``--suite holdout``
+runs the dev user tasks against the held-out injections instead (written by an
+independent agent, SPEC §7) and writes ``results/holdout.json``; holdout
+results are reported separately and never used to tune rules.
 
-Usage: ``python -m evals.harness [--out PATH]``.
+Usage: ``python -m evals.harness [--suite dev|holdout] [--out PATH]``.
 """
 
 import argparse
@@ -41,6 +44,17 @@ from planners.baselines.undefended import run_undefended
 from planners.gullible import GulliblePlanner
 from planners.oracle import OraclePlanner
 from quarantine.extractor import extract_order_ids
+
+SUITES = ("dev", "holdout")
+
+
+def injections(suite: str) -> tuple[InjectionTask, ...]:
+    if suite == "holdout":
+        from evals.tasks.holdout import INJECTION_TASKS as HOLDOUT
+
+        return HOLDOUT
+    return INJECTION_TASKS
+
 
 MAIN = ("warrant+oracle", "warrant+gullible", "undefended+gullible")
 BASELINES = ("undefended+gullible",)
@@ -311,19 +325,24 @@ def report(rows: list[Outcome], summary: dict[str, dict[str, Any]]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--out", type=Path, default=Path("results/eval.json"))
+    parser.add_argument("--suite", choices=SUITES, default="dev")
+    parser.add_argument("--out", type=Path)
     args = parser.parse_args(argv)
+    dev = args.suite == "dev"
+    args.out = args.out or Path("results/eval.json" if dev else "results/holdout.json")
+    audit_db = DEFAULT_DB if dev else DEFAULT_DB.with_name("audit_holdout.sqlite")
     block_network()
     audit: list[tuple[str, str]] = []
-    rows = evaluate(audit=audit)
+    rows = evaluate(injection_tasks=injections(args.suite), audit=audit)
     summary = summarize(rows)
-    DEFAULT_DB.unlink(missing_ok=True)
-    write_audit(audit, DEFAULT_DB)
+    audit_db.unlink(missing_ok=True)
+    write_audit(audit, audit_db)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     meta = {
         "git_commit": _git_commit(),
         "python": sys.version,
         "platform": platform.platform(),
+        "suite": args.suite,
         "seeds": sorted({t.seed for t in USER_TASKS}),
         "model": None,
         "extractor": "quarantine.extractor.extract_order_ids",
@@ -332,7 +351,7 @@ def main(argv: list[str] | None = None) -> int:
     args.out.write_text(json.dumps(payload, indent=1, ensure_ascii=False), encoding="utf-8")
     print(report(rows, summary))
     print(f"\nwrote {args.out} ({len(rows)} runs, commit {meta['git_commit']})")
-    print(f"wrote {DEFAULT_DB} ({len(audit)} audit rows; `tasks.py trace <run_id>` explains one)")
+    print(f"wrote {audit_db} ({len(audit)} audit rows; `tasks.py trace <run_id>` explains one)")
     return 0
 
 

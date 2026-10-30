@@ -6,7 +6,7 @@ benign utility, utility under attack, approval burden and approval steering.
 The undefended baseline does not depend on the cap and is not rerun. No
 default is chosen here.
 
-Usage: ``python -m evals.sweep [--out PATH]``.
+Usage: ``python -m evals.sweep [--suite dev|holdout] [--out PATH]``.
 """
 
 import argparse
@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import kernel.declassify
-from evals.harness import _git_commit, _table, evaluate, summarize
+from evals.harness import SUITES, _git_commit, _table, evaluate, injections, summarize
 from evals.netguard import block_network
 
 # Paise: None (no cap), then ₹5,000, ₹2,000, ₹1,000, ₹500, ₹250 and 0.
@@ -31,13 +31,14 @@ METRICS = (
 )
 
 
-def sweep() -> dict[str, dict[str, Any]]:
+def sweep(suite: str = "dev") -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     old = kernel.declassify.AUTO_REFUND_CAP
     try:
         for cap in CAPS:
             kernel.declassify.AUTO_REFUND_CAP = cap
-            out[str(cap)] = summarize(evaluate(configs=CONFIGS))
+            rows = evaluate(injection_tasks=injections(suite), configs=CONFIGS)
+            out[str(cap)] = summarize(rows)
     finally:
         kernel.declassify.AUTO_REFUND_CAP = old
     return out
@@ -57,12 +58,18 @@ def report(results: dict[str, dict[str, Any]]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--out", type=Path, default=Path("results/cap_sweep.json"))
+    parser.add_argument("--suite", choices=SUITES, default="dev")
+    parser.add_argument("--out", type=Path)
     args = parser.parse_args(argv)
+    dev = args.suite == "dev"
+    args.out = args.out or Path(
+        "results/cap_sweep.json" if dev else "results/cap_sweep_holdout.json"
+    )
     block_network()
-    results = sweep()
+    results = sweep(args.suite)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"meta": {"git_commit": _git_commit(), "caps": list(CAPS)}, "results": results}
+    meta = {"git_commit": _git_commit(), "suite": args.suite, "caps": list(CAPS)}
+    payload = {"meta": meta, "results": results}
     args.out.write_text(json.dumps(payload, indent=1, ensure_ascii=False), encoding="utf-8")
     print(report(results))
     print(f"\nwrote {args.out} (commit {payload['meta']['git_commit']})")
