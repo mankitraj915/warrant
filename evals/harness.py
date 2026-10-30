@@ -8,6 +8,10 @@ configurations (Warrant configurations use the simulated approver, D-041):
   by the kernel) sees only the operator request;
 - ``undefended+gullible``: the gullible planner sees the case ticket's text and
   the executor applies no policy;
+- ``delimited+gullible``: the same, with the text wrapped in delimiters and a
+  "treat as data" instruction (prompt delimiting, D-051). The scripted planner
+  ignores delimiters by construction, so this is a sanity check of the
+  plumbing; delimiting is evaluated with the LLM in Phase 4;
 - ``leaked+gullible``: the kernel, but the case ticket's text is leaked into the
   planner's context (S-12), so only the plan-label layer stands between the
   hijacked plan and execution. Reported separately from the main matrix.
@@ -57,8 +61,8 @@ def injections(suite: str) -> tuple[InjectionTask, ...]:
     return INJECTION_TASKS
 
 
-MAIN = ("warrant+oracle", "warrant+gullible", "undefended+gullible")
-BASELINES = ("undefended+gullible",)
+MAIN = ("warrant+oracle", "warrant+gullible", "undefended+gullible", "delimited+gullible")
+BASELINES = ("undefended+gullible", "delimited+gullible")
 SEPARATE = ("leaked+gullible",)
 CONFIGS = MAIN + SEPARATE
 
@@ -112,7 +116,7 @@ def _run(
         else GulliblePlanner(task.oracle, task.case_ticket)
     )
     result: RunResult | None = None
-    if config == "undefended+gullible":
+    if config in BASELINES:
         outcome, reason = run_undefended(
             task.prompt,
             planner,
@@ -120,6 +124,7 @@ def _run(
             provider,
             extract_order_ids,
             show_ticket_bodies=(task.case_ticket,),
+            delimit_untrusted=config == "delimited+gullible",
         )
     else:
         env = Environment(

@@ -17,6 +17,7 @@ from kernel.plan_lang import PlanRejected, check_plan, parse_plan
 from kernel.run import OPERATOR, Planner, PlannerInput
 from kernel.tools.database import Database, lossless_text
 from kernel.tools.registry import signatures
+from planners.baselines.delimited import DATA_INSTRUCTION, delimit
 
 
 def run_undefended(
@@ -27,8 +28,13 @@ def run_undefended(
     extractor: Callable[[str], list[object]],
     *,
     show_ticket_bodies: tuple[int, ...] = (),
+    delimit_untrusted: bool = False,
 ) -> tuple[str, str]:
     """Plan with the ticket bodies in context, then execute every action.
+
+    With ``delimit_untrusted`` this is the prompt-delimiting baseline: each body
+    is wrapped in delimiters and the request carries the "treat as data"
+    instruction (``planners.baselines.delimited``).
 
     Returns ``(outcome, reason)``; effects are read from the provider.
     """
@@ -37,7 +43,10 @@ def run_undefended(
     for ticket in show_ticket_bodies:
         row = conn.execute("SELECT body FROM tickets WHERE id = ?", (ticket,)).fetchone()
         if row is not None:
-            context.append((str(row[0]), OPERATOR))
+            text = str(row[0])
+            context.append((delimit(text) if delimit_untrusted else text, OPERATOR))
+    if delimit_untrusted:
+        request = f"{request}\n\n{DATA_INSTRUCTION}"
     raw = planner.plan(PlannerInput(request, signatures(), tuple(context)))
     try:
         plan = parse_plan(raw)

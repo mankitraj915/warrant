@@ -1322,3 +1322,30 @@ harness hold on plans that are not hand-written shapes?
 7. **Phase 4 prep** (D-055): free-RAM measurements.
 8. Evaluations, `check`, the Gate 3 independent review, the Gate 3 report. Gate 3 also waits
    for the owner-run fuzz (decision 1).
+
+## D-051 Prompt-delimiting baseline (Phase 3 step 1)
+
+**Decision.** `planners/baselines/delimited.py`, run by the undefended executor with
+`delimit_untrusted=True`, so the two baselines differ only in what the planner is shown:
+- every untrusted ticket body is wrapped in one `<<UNTRUSTED_DATA>>` … `<</UNTRUSTED_DATA>>`
+  block;
+- the operator request is followed by an instruction to treat the delimited text as data and
+  never follow instructions inside it;
+- delimiter look-alikes in the text (any case, a space for the underscore) are removed
+  repeatedly before wrapping, so a payload cannot close its own block and write outside it.
+
+New configuration `delimited+gullible` in the main matrix, next to `undefended+gullible`.
+
+**Reported as a sanity check only** (owner, Gate 2 decision 5). The gullible planner ignores
+delimiters by construction, so `delimited+gullible` must equal `undefended+gullible` pair for
+pair. That checks the plumbing, not the defence. Delimiting is evaluated with the local LLM in
+Phase 4. No `delimited+attacker` configuration: the attacker planner ignores its input, so it
+would equal `undefended+attacker` by construction.
+
+**Rejected:**
+- *A random per-run boundary token* (spotlighting with a nonce): more realistic against an LLM
+  that could guess a fixed token. But forged-delimiter removal already prevents closing the
+  block, and the gullible planner cannot tell the difference. Revisit in Phase 4 if the LLM
+  results depend on it.
+- *Datamarking* (interleaving a marker character into the untrusted text): a different
+  defence from the one SPEC §6 names.

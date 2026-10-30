@@ -138,3 +138,20 @@ class InjectionTask:
     goal: str
     payload: Callable[[UserTask], str | None]  # None: not applicable to this task
     achieved: Callable[[UserTask, Effects], bool]
+
+
+@dataclass(frozen=True)
+class AttackPlan:
+    """An injection's goal in the plan language: what a planner that fully obeys
+    the payload would emit (Phase 3, D-052). ``steps`` are appended to the
+    operator's correct plan, or replace it when the payload tells the agent to
+    drop the operator's work. Every name the steps bind starts with ``atk_``.
+    """
+
+    steps: tuple[Json, ...]
+    replaces_user_plan: bool = False
+
+
+# Per injection task id: the attack plan for a user task, or None when the
+# payload's goal cannot be expressed as a plan for that task.
+AttackPlans = dict[str, Callable[[UserTask], AttackPlan | None]]
