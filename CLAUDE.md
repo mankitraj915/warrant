@@ -55,7 +55,8 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 - `fuzz-chunks`: the same fuzzing as sequential chunks with recorded seeds and measured peak
   RSS (`--test --chunks --examples --base-seed`; log in `results/fuzz_chunks.jsonl`; D-024).
 - `eval`: default offline evaluation (no LLM): dev suite (40 user tasks, 11 injections) ×
-  {warrant+oracle, warrant+gullible, undefended+gullible, leaked+gullible}, Warrant
+  {warrant+oracle, warrant+gullible, undefended+gullible, delimited+gullible, leaked+gullible,
+  undefended+attacker, delimited+attacker, leaked+attacker} (D-051, D-052), Warrant
   configurations with the simulated approver (D-041); writes `results/eval.json` (gitignored)
   and prints tables; also copies every run's audit row to `results/audit.sqlite`.
 - `trace <run_id>`: explain one run from its audit row (actions, argument provenance, verdicts,
@@ -66,16 +67,35 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 - `eval --suite holdout` / `sweep --suite holdout`: the same against the held-out injections
   (`evals/tasks/holdout/`, independent red-team agent, D-043); writes `results/holdout.json`,
   `results/audit_holdout.sqlite`, `results/cap_sweep_holdout.json`. Never tune against it.
+- `phase3-run --out DIR [--resume]`: the owner-run Phase 3 measurements (`scripts/phase3_run.py`):
+  check, per-mutant detection (`scripts/mutant_rates.py`, mixed and grammar-only generators), NI
+  statistics, chunked random fuzz, both evals, both sweeps. Refuses a dirty tree; logs each step
+  and its exit code to `DIR/steps.jsonl` and `DIR/NN-<step>.log`; continues past failures.
+  Run only outside a session, from a clean worktree (DECISIONS "Phase 3 owner run").
 - `eval-llm`: evaluation with the local model. Phase 4, not yet.
 - `report`: regenerate `docs/RESULTS.md`. Phase 5, not yet.
 - `demo`: scripted demonstration. Phase 5, not yet.
 
 ## Current status
 
-Phase: **3 in progress** (Gate 2 approved 2026-10-30; see DECISIONS "Gate 2 outcome" and
-"Phase 3 plan"). Gate 3 also waits for the owner-run post-fix chunked fuzz. The owner runs
-the command in DECISIONS "Gate 2 outcome" (pinned worktree `C:\Users\manki\warrant-fuzz-gate2`
-at 0905584). Afterwards, read `results/fuzz_chunks.jsonl`, verify all 60 chunks (seeds
-202610800–819, 202610900–919, 202611000–019, commit 0905584) and record them in D-050. Never
-run the fuzz inside a session (Claude Code's memory guard stops it). `check` takes about
-4 min.
+Phase: **3 in progress, waiting for two owner-run commands** (Gate 2 approved 2026-10-30; see
+DECISIONS "Gate 2 outcome", "Phase 3 plan", D-051 to D-055 and "Phase 3 owner run"). The Phase 3
+code is on branch `phase3-wip`, not merged; a full `check` has not yet passed on it. With Claude
+Code closed, the owner runs:
+1. the Gate 2 fuzz (command in DECISIONS "Gate 2 outcome"; worktree
+   `C:\Users\manki\warrant-fuzz-gate2` at 0905584), then
+2. the Phase 3 run (command in DECISIONS "Phase 3 owner run"; worktree
+   `C:\Users\manki\warrant-phase3`), which writes `results/phase3/`.
+
+When they return:
+- verify `results/fuzz_chunks.jsonl` (60 chunks, seeds 202610800–819, 202610900–919,
+  202611000–019, commit 0905584) and record it in D-050;
+- verify every step in `results/phase3/steps.jsonl` and its logs, and record the results: the
+  D-053 grammar-only mutant table, the D-054 halt shares (compare with D-050) and burden, and
+  the D-055 free memory with Claude Code closed. Write `docs/RESULTS.md` ("undefended (with
+  execution hygiene)"; D-052);
+- run the Gate 3 independent review (give the reviewer the D-054 test table and ask it to check
+  each row), post the report and stop at Gate 3.
+
+Never run the fuzz or the Phase 3 run inside a session (Claude Code's memory guard stops them).
+`check` takes about 7 min.
