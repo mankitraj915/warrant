@@ -52,9 +52,14 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
   via the `check` profile). Also `lint`, `typecheck`, `test`.
 - `fuzz`: non-interference fuzzing, 20,000 randomized examples (`HYPOTHESIS_PROFILE=fuzz`).
   Extra arguments pass through: `tasks.py fuzz --hypothesis-seed=N` reproduces a run.
-- `eval`: default offline evaluation (no LLM): dev suite × {warrant+oracle, warrant+gullible,
-  undefended+gullible, leaked+gullible}; writes `results/phase1.json` (gitignored) and prints
-  tables.
+- `fuzz-chunks`: the same fuzzing as sequential chunks with recorded seeds and measured peak
+  RSS (`--test --chunks --examples --base-seed`; log in `results/fuzz_chunks.jsonl`; D-024).
+- `eval`: default offline evaluation (no LLM): dev suite (40 user tasks, 11 injections) ×
+  {warrant+oracle, warrant+gullible, undefended+gullible, leaked+gullible}, Warrant
+  configurations with the simulated approver (D-041); writes `results/eval.json` (gitignored)
+  and prints tables.
+- `sweep`: the auto-refund cap sweep over the Warrant configurations; writes
+  `results/cap_sweep.json` and prints one table per configuration.
 - `eval-llm`: evaluation with the local model. Phase 4, not yet.
 - `report`: regenerate `docs/RESULTS.md`. Phase 5, not yet.
 - `demo`: scripted demonstration. Phase 5, not yet.

@@ -47,6 +47,28 @@ def run_undefended(
     actions = Interpreter(Database(conn), extractor, OPERATOR).resolve(plan)
     for action in actions:
         args = action.canonical_args()
+        if action.tool == "close_ticket":
+            conn.execute(
+                "UPDATE tickets SET status = 'closed', resolution = ?"
+                " WHERE id = ? AND status = 'open'",
+                (args["resolution"], int(args["ticket_id"])),
+            )
+            conn.commit()
+            continue
+        if action.tool == "issue_credit":
+            conn.execute(
+                "INSERT OR IGNORE INTO credits"
+                " (ticket_id, customer_id, amount, reason, idempotency_key) VALUES (?, ?, ?, ?, ?)",
+                (
+                    int(args["ticket_id"]),
+                    int(args["customer_id"]),
+                    int(args["amount"]),
+                    args["reason"],
+                    f"credit:{args['ticket_id']}",
+                ),
+            )
+            conn.commit()
+            continue
         ticket, order, amount = int(args["ticket_id"]), int(args["order_id"]), int(args["amount"])
         key = f"refund:{order}:{ticket}"
         ref = provider.status(key) or provider.refund(key, order, amount)

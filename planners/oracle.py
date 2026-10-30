@@ -89,3 +89,90 @@ def refund_mentioned_eligible(ticket: int) -> Json:
             )
         ),
     )
+
+
+def steps_of(*plans: Json) -> Json:
+    """Run several plans' steps in sequence (their ``let`` names must not clash)."""
+    return plan(*(step for p in plans for step in p["steps"]))
+
+
+def close(ticket: int, resolution: str) -> Json:
+    return plan(call("close_ticket", ticket_id=lit(ticket), resolution=lit(resolution)))
+
+
+def credit(ticket: int, customer: int, amount: int, reason: str) -> Json:
+    """A credit with every argument stated by the operator."""
+    return plan(
+        call(
+            "issue_credit",
+            ticket_id=lit(ticket),
+            customer_id=lit(customer),
+            amount=lit(amount),
+            reason=lit(reason),
+        )
+    )
+
+
+def refund_incident_orders(ticket: int, incident: int, customer: int | None = None) -> Json:
+    """Refund in full the eligible orders a staff-recorded incident lists
+    (optionally only one customer's)."""
+    eligible = op("gt", ref("io", "refundable"), lit(0))
+    if customer is not None:
+        eligible = op("and", eligible, op("eq", ref("io", "customer_id"), lit(customer)))
+    return plan(
+        call("incident_orders", "affected", incident_id=lit(incident)),
+        expr(filter_(ref("affected"), "io", eligible), "hit"),
+        expr(map_(ref("hit"), "h", _refund(ticket, ref("h", "id"), ref("h", "refundable")))),
+    )
+
+
+def credit_if_order_mentioned(ticket: int, amount: int, reason: str) -> Json:
+    """Data-dependent: one credit to the ticket's customer if the ticket text
+    names one of that customer's orders."""
+    mentioned = op("contains", ref("cids"), ref("co", "id"))
+    return plan(
+        call("read_ticket", "ct", ticket_id=lit(ticket)),
+        expr(
+            map_(
+                ref("ct"),
+                "ctk",
+                call("extract_order_ids", "cids", text=ref("ctk", "body")),
+                call("query_orders", "corders", customer_id=ref("ctk", "customer_id")),
+                expr(filter_(ref("corders"), "co", mentioned), "csel"),
+                expr(op("at", ref("csel"), lit(0)), "cone"),
+                expr(
+                    map_(
+                        ref("cone"),
+                        "c1",
+                        call(
+                            "issue_credit",
+                            ticket_id=lit(ticket),
+                            customer_id=ref("ctk", "customer_id"),
+                            amount=lit(amount),
+                            reason=lit(reason),
+                        ),
+                    )
+                ),
+            )
+        ),
+    )
+
+
+def credit_ticket_customer_amount(ticket: int, amount: int, reason: str) -> Json:
+    """Credit the customer who opened the ticket (customer id read from the ticket)."""
+    return plan(
+        call("read_ticket", "gt", ticket_id=lit(ticket)),
+        expr(
+            map_(
+                ref("gt"),
+                "gtk",
+                call(
+                    "issue_credit",
+                    ticket_id=lit(ticket),
+                    customer_id=ref("gtk", "customer_id"),
+                    amount=lit(amount),
+                    reason=lit(reason),
+                ),
+            )
+        ),
+    )
