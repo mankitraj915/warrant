@@ -6,6 +6,8 @@ Usage (normally through ``scripts/tasks.py fuzz-chunks``)::
     python scripts/fuzz_chunks.py --test test_noninterference --chunks 20 \
         --examples 1000 --base-seed 20261030
 
+``--test`` is a property in ``tests/test_noninterference.py`` or a full
+``path::name`` id (e.g. the NI-5 property in ``tests/test_approval_binding.py``).
 Chunk ``i`` uses seed ``base_seed + i``. Each chunk appends one JSON line to
 ``results/fuzz_chunks.jsonl``: test, seed, examples, exit code, seconds, peak
 RSS in MB and Hypothesis's summary. Peak RSS is measured inside the pytest
@@ -35,7 +37,7 @@ def run_chunk(test: str, seed: int, examples: int) -> dict[str, object]:
         PY,
         "-m",
         "pytest",
-        f"tests/test_noninterference.py::{test}",
+        test if "::" in test else f"tests/test_noninterference.py::{test}",
         "--hypothesis-show-statistics",
         f"--hypothesis-seed={seed}",
         "-p",
