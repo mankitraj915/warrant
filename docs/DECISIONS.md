@@ -1601,3 +1601,26 @@ Steps:
    `undefended+gullible`, `delimited+gullible`, `leaked+gullible`, `undefended+attacker`,
    `delimited+attacker` and `leaked+attacker`.
 6. **`sweep-dev`, `sweep-holdout`.**
+
+**Command** (cmd or PowerShell; run after the Gate 2 fuzz, with Claude Code closed). It runs
+in a detached worktree at 6e27f60, `C:\Users\manki\warrant-phase3`, outside OneDrive. Later
+commits on `phase3-wip` change only documentation. It writes to the main tree's
+`results/phase3/`, and rerunning the same command after an interruption resumes it:
+
+```
+uv run --offline --locked --directory C:\Users\manki\warrant-phase3 python scripts/tasks.py phase3-run --resume --out C:\Users\manki\OneDrive\Desktop\warrant\results\phase3
+```
+
+I checked it from the worktree with every step pre-marked as passed (it parses, sees a clean tree
+and builds all 12 steps), and checked that without `--resume` it refuses an existing log.
+
+**Estimated time: about 1 to 1.5 hours, at most about 2.** Estimates come from this session's
+measurements:
+- `check`: about 7 min (407 s in this session).
+- `mutant-rates`: 25–50 min. Each count run goes to the full budget, at about 16 ms per
+  single-run example and 12 ms per multirun example (D-054's adoption runs). That is about
+  12 min per generator. Catch runs stop at the first violation (plus shrinking), and a missed
+  mutant costs its full budget.
+- NI statistics: about 2 min.
+- Chunked fuzz: 15–20 min (60 chunks at 10–16 s plus process start-up).
+- Evaluations and sweeps: about 2–3 min (6–22 s each with fewer configurations at D-050).
