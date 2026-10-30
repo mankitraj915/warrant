@@ -72,8 +72,11 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 
 ## Current status
 
-Phase: 2 in progress (Gate 1 approved 2026-10-30; post-fix chunked fuzz passed, D-024 amended).
-Steps 1–4 of the "Phase 2 plan" in `docs/DECISIONS.md` are done (execution/audit, approval
-binding, new tools, goodwill rule and auto-refund cap, NI harness extensions; D-037–D-040, F-2).
-Next: step 5 (suite growth to ~40 tasks, simulated approver, cap sweep), then holdout, trace CLI,
-chunked fuzz and Gate 2. `check` takes about 2.5 min.
+Phase: 2 complete, at **⛔ Gate 2**, waiting for the owner's decision (Gate 1 approved
+2026-10-30). All Phase 2 plan steps are done (D-037–D-043). The Gate 2 independent review
+(`docs/reviews/GATE2_REVIEW.md`) found seven issues, all fixed, with regression tests in
+`tests/test_gate2_regressions.py` (D-044–D-049). Evaluation re-runs after the fixes are in
+D-050 (unchanged). The post-fix chunked fuzz is still owed: it was stopped for low system
+memory after 1 of 60 chunks (D-050), so rerun it only with the owner's go-ahead and enough
+free memory (base seeds 202610800 / 202610900 / 202611000; `--first 1` resumes the first
+property). Next: the owner's Gate 2 decision, then Phase 3. `check` takes about 4 min.

@@ -1172,3 +1172,51 @@ instead of stopping.
 
 **Not covered.** `customers.display_name` is mutated, but no tool reads it, so those mutations
 do nothing. The execution pre-pass has no mutant (D-045).
+
+## D-050 Re-runs after the Gate 2 fixes (commit 50415cb)
+
+**Evaluation.** Commands, all at 50415cb: `tasks.py eval`, `tasks.py eval --suite holdout`,
+`tasks.py sweep`, `tasks.py sweep --suite holdout`. The outputs say `-dirty` only because
+CLAUDE.md had an uncommitted status edit.
+
+Every metric is identical to D-042 (dev) and D-043 (holdout), in every configuration and at
+every cap value:
+- **Dev, warrant+oracle:**
+  - attack success 5/414 (T13+I1, T13+I4, T33+I1, T33+I4: F-1; T28+I11: goodwill trigger);
+  - benign utility 39/40;
+  - utility under attack 396/414;
+  - burden 5/40;
+  - steering 2/414.
+- **Dev, other configurations:** undefended 393/414; leaked 0/414.
+- **Holdout, warrant+oracle:** attack success 4/488, utility under attack 473/488, steering
+  2/488. Undefended 39/488.
+- **Sweeps:** attack success drops only at ₹250 and below (dev 5 → 1, holdout 4 → 0). Burden
+  rises 5 → 15 of 40.
+- **PII canary scan:** 0 hits in both suites.
+
+So the extraction change (D-044), the per-customer goodwill bound (D-047) and the execution
+re-check change (D-045) moved no measured metric on these suites. That shows the suites barely
+exercise these mechanisms. It does not show they cost nothing in general: for example, a
+legitimate second goodwill credit for the same customer now needs approval.
+
+**NI statistics** (weakest point 3 of the review). Command:
+`HYPOTHESIS_PROFILE=fuzz WARRANT_FUZZ_EXAMPLES=2000 pytest tests/test_noninterference.py::test_noninterference --hypothesis-show-statistics --hypothesis-seed=202610700`.
+Result: 2,000 passing, 0 failing, 51 invalid.
+- Hypothesis percentages are over all 2,051 generated cases, including the invalid ones.
+- A rule was consulted in 63.1% of cases. In 45.98 of those 63.09 points (73%) the
+  release projections were equal, so NI-3 constrained executed effects.
+- A rule admitted an action in 5.8% of examples.
+- A run was suppressed (effects in one world only) in 2.1% of examples.
+
+**Chunked fuzz at 50415cb: not completed.** I started
+`tasks.py fuzz-chunks --chunks 20 --examples 1000` for the three properties (base seeds
+202610800 single-run, 202610900 multirun, 202611000 NI-5). Claude Code stopped it when the
+machine ran critically low on memory, with other processes using the memory. Free memory was
+362 MB at the start and 150 MB afterwards.
+
+Only chunk 0 of `test_noninterference` finished: seed 202610800, 1,000 passing, 0 failing, 24
+invalid, 15.8 s, peak RSS 91.4 MB. The other 59 chunks did not run, and the 20,000-per-property
+re-run after the Gate 2 fixes is still owed. It is not retried without the owner's go-ahead.
+The fuzz evidence at 50415cb is therefore that chunk, `tasks.py check` (derandomized, 200
+examples per property, plus the mutants at 3,000/3,000/2,000) and the 2,000-example statistics
+run above.
