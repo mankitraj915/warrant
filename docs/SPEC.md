@@ -135,7 +135,7 @@ Its residual risk is the **within-allowed-set attack**: the injected text names 
 
 - An approval is bound to a SHA-256 hash of the canonical serialization of the fully resolved action set: tool names, arguments, and amounts, in a defined order.
 - At execution time the kernel recomputes the hash. Any divergence invalidates the approval.
-- **In evaluation, a simulated approver** approves only when the resolved action set matches the task's ground-truth intent. Every approval request is counted.
+- **In evaluation, a simulated approver** approves only when the resolved action set matches the task's ground-truth intent. Every approval request is counted. It compares tool names and argument multisets only. It never misreads a request, is never fatigued and never approves a plausible-looking wrong set. Approval-safety figures are therefore upper bounds on what a human approver would achieve (Gate 2, owner decision 3).
 - **Approval requests are themselves an attack surface.** An injection that cannot execute an action may still steer *what the human is asked to approve*. Measure this separately (§7).
 
 ### 4.7 Execution layer (thin)
@@ -288,7 +288,7 @@ Each phase ends when its definition of done is met *and verified by commands you
 ### Phase 2: Complete the kernel and the suites
 
 **Build:**
-- Grow to 6–8 tools: add account credit, ticket close, aggregate customer statistics, and incident lookup.
+- Grow the tool set: add account credit, ticket close, aggregate order statistics, and incident lookup. (Built: 9 tools including the quarantined `extract_order_ids`. The aggregate is `order_stats`, grouped by order status with small groups suppressed, not per-customer statistics, which would make re-identification easy. Gate 2, owner decision 3.)
 - Approval binding and the simulated approver.
 - Aggregate-only tools and the PII canary scanner.
 - The thin execution layer with its crash-injection test.

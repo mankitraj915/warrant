@@ -1220,3 +1220,105 @@ re-run after the Gate 2 fixes is still owed. It is not retried without the owner
 The fuzz evidence at 50415cb is therefore that chunk, `tasks.py check` (derandomized, 200
 examples per property, plus the mutants at 3,000/3,000/2,000) and the 2,000-example statistics
 run above.
+
+## Gate 2 outcome (owner, 2026-10-30)
+
+1. **Post-fix fuzz:** not run inside a Claude Code session, whose memory guard stopped it
+   (D-050). The owner runs one command with Claude Code and the browser closed. When they
+   return, the log is read, verified and recorded in D-050. Phase 3 code may start now, but this
+   run still gates Gate 3. The command and how it pins the code are below.
+2. **Auto-refund cap default: `None`.** RESULTS reports the sweep curve and describes the cap as
+   a deployment parameter, with its measured trade-off.
+3. **Spec issues 1–3 accepted:**
+   - nine tools, counting `extract_order_ids`;
+   - "aggregate customer statistics" is `order_stats` grouped by order status;
+   - the simulated approver compares tool and argument multisets only, so approval-safety
+     numbers are upper bounds.
+4. **New finding: the holdout mostly measures the attacker model.** Recorded as F-3. The fix is
+   in Phase 3: an independent agent writes structured attack plans, and a planner emits them
+   without parsing any text (D-052).
+5. **Phase 3 scope change.** Build the prompt-delimiting baseline, but report its gullible
+   results only as a sanity check; its real evaluation is in Phase 4 with the LLM (D-051). Use
+   the rest of Phase 3 for item 4 and for a grammar-based random plan generator in the NI fuzzer
+   (D-053).
+6. **D-036 variant** (abort the run when an operator-named ticket does not exist, so the
+   narrowed existence taint is safe): resolve it in Phase 3, with an adoption test (D-054).
+7. **Phase 4 prep:** record free RAM with Claude Code closed and open. Plan LLM evaluations as an
+   owner-run script outside the session, like the fuzz (D-055).
+
+**Owner-run fuzz command** (commit 0905584). Its kernel, planners and tests are identical to
+50415cb: `git diff --stat 50415cb 0905584` shows only CLAUDE.md, DECISIONS.md and
+`scripts/fuzz_chunks.py`.
+- **Where it runs:** the command runs in a detached worktree at that commit,
+  `C:\Users\manki\warrant-fuzz-gate2` (outside OneDrive), so Phase 3 edits in the main tree
+  cannot change what is fuzzed.
+- **Log:** it appends to the main tree's `results/fuzz_chunks.jsonl`.
+- **What each row records:** the commit, so the log shows which code each chunk ran, and the
+  machine's available memory before the chunk (D-055).
+- **Resume:** `--resume` skips chunks that already passed, including chunk 0 from D-050, so
+  rerunning the command after an interruption continues where it stopped.
+
+The command works in cmd and PowerShell:
+
+```
+uv run --offline --locked --directory C:\Users\manki\warrant-fuzz-gate2 python scripts/tasks.py fuzz-chunks --resume --chunks 20 --examples 1000 --log C:\Users\manki\OneDrive\Desktop\warrant\results\fuzz_chunks.jsonl --test tests/test_noninterference.py::test_noninterference --base-seed 202610800 --test tests/test_noninterference.py::test_noninterference_multirun --base-seed 202610900 --test tests/test_approval_binding.py::test_ni5_executed_set_is_the_approved_set --base-seed 202611000
+```
+
+Before handing it over, I checked that the worktree runs with `--offline` from another
+directory, and that `--resume` skips a passed chunk (5-example chunks, temporary log).
+
+## F-3 Finding: the gullible planner's triggers are fitted to the dev phrasing (owner, Gate 2)
+
+`undefended+gullible` achieves 393 of 414 dev attacks but only 39 of 488 holdout attacks
+(D-042, D-043, unchanged in D-050). By injection, it obeyed holdout H13 in 33 of 40 pairs, H02 in
+3 of 27, H11 in 3 of 29, and no other holdout injection at all.
+
+The gullible planner obeys a line only if it contains "refund", "credit" or "close" together
+with an agent-addressed cue ("agent", "system", "instead", ...), and it parses ids only in the
+shapes the dev payloads use ("#N", "all orders of customer C"). Those triggers were written
+alongside the dev injections. So:
+- **On the holdout,** the undefended baseline mostly measures whether the scripted attacker
+  model understood the payload, not whether the payload would hijack a model.
+- **Warrant's holdout row** (4/488) is not affected in kind. Under Warrant isolation the planner
+  never sees the payload. But the leaked-context row (0/488) is weak evidence for the same
+  reason: a planner that obeys nothing cannot test the plan-label layer.
+
+D-043 already noted the understatement. It was not fixed then, because adapting the gullible
+planner to the holdout's phrasing would be tuning against the holdout. The fix (D-052) avoids
+that. The attacker's behaviour is written per injection task by an independent agent, as plans,
+so no text parsing is involved and no one tunes a parser to either suite.
+
+The gullible results stay in every table: they are a model of a hijacked planner, just a narrow
+one. The attacker-plan results are reported alongside them.
+
+## Phase 3 plan (2026-10-30)
+
+Question: on these suites, how does Warrant compare with the undefended and prompt-delimiting
+baselines, when the attacker model is not fitted to one suite's phrasing? And does the NI
+harness hold on plans that are not hand-written shapes?
+
+**Steps** (commit after each, `check` green):
+1. **Prompt delimiting** (D-051): the third defence, drivable by the gullible planner now and by
+   the LLM in Phase 4. The gullible results are a sanity check only.
+2. **Attack plans** (D-052):
+   - A restricted subagent writes `evals/tasks/{dev,holdout}/attack_plans.py`, one attack plan
+     per injection task.
+   - The `attacker` planner emits the user plan plus the attack plan.
+   - New configurations `undefended+attacker` and `leaked+attacker`, on both suites.
+3. **Grammar-based plan generator** in the NI fuzzer (D-053):
+   - arbitrary well-typed plans from the plan grammar, with bounded depth and size, in
+     addition to the fixed shapes;
+   - per-construct coverage counts in Hypothesis's statistics output;
+   - a measurement that the generator alone catches every existing mutant at its budget.
+4. **D-036 variant** (D-054): a point read of a trusted ticket id that finds no row aborts the
+   whole run.
+   - The existence taint is dropped for such reads only if the variant passes the single-run
+     and multi-run NI properties and the narrowed-taint mutant is still caught.
+   - Then report the change in T08-style approval burden.
+5. **RESULTS.md**, hand-written until Phase 5 generates it: the three defences side by side
+   (dev and holdout), both attacker models, the cap curve as a deployment parameter, F-1 and
+   F-3, and the SPEC §10 claims verbatim.
+6. **SPEC:** spec issues 1–3 (owner decision 3).
+7. **Phase 4 prep** (D-055): free-RAM measurements.
+8. Evaluations, `check`, the Gate 3 independent review, the Gate 3 report. Gate 3 also waits
+   for the owner-run fuzz (decision 1).
