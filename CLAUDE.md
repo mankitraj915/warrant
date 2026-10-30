@@ -63,6 +63,9 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
   `T12:I1:warrant+oracle:seed11`; `--db PATH` reads another audit database.
 - `sweep`: the auto-refund cap sweep over the Warrant configurations; writes
   `results/cap_sweep.json` and prints one table per configuration.
+- `eval --suite holdout` / `sweep --suite holdout`: the same against the held-out injections
+  (`evals/tasks/holdout/`, independent red-team agent, D-043); writes `results/holdout.json`,
+  `results/audit_holdout.sqlite`, `results/cap_sweep_holdout.json`. Never tune against it.
 - `eval-llm`: evaluation with the local model. Phase 4, not yet.
 - `report`: regenerate `docs/RESULTS.md`. Phase 5, not yet.
 - `demo`: scripted demonstration. Phase 5, not yet.
