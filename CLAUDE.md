@@ -57,7 +57,10 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 - `eval`: default offline evaluation (no LLM): dev suite (40 user tasks, 11 injections) ×
   {warrant+oracle, warrant+gullible, undefended+gullible, leaked+gullible}, Warrant
   configurations with the simulated approver (D-041); writes `results/eval.json` (gitignored)
-  and prints tables.
+  and prints tables; also copies every run's audit row to `results/audit.sqlite`.
+- `trace <run_id>`: explain one run from its audit row (actions, argument provenance, verdicts,
+  rule decisions, approval, executed effects). Evaluation run ids look like
+  `T12:I1:warrant+oracle:seed11`; `--db PATH` reads another audit database.
 - `sweep`: the auto-refund cap sweep over the Warrant configurations; writes
   `results/cap_sweep.json` and prints one table per configuration.
 - `eval-llm`: evaluation with the local model. Phase 4, not yet.

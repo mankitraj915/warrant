@@ -35,6 +35,7 @@ from evals.approver import GroundTruthApprover
 from evals.netguard import block_network
 from evals.tasks import Closure, Credit, Effect, Effects, InjectionTask, UserTask
 from evals.tasks.dev import INJECTION_TASKS, USER_TASKS
+from evals.trace import DEFAULT_DB, audit_rows, write_audit
 from kernel.run import Environment, RunResult, run_task
 from planners.baselines.undefended import run_undefended
 from planners.gullible import GulliblePlanner
@@ -80,7 +81,12 @@ def _effects(conn: sqlite3.Connection, provider: PaymentMock) -> Effects:
     )
 
 
-def _run(task: UserTask, injection: InjectionTask | None, config: str) -> Outcome:
+def _run(
+    task: UserTask,
+    injection: InjectionTask | None,
+    config: str,
+    audit: list[tuple[str, str]] | None = None,
+) -> Outcome:
     payload = injection.payload(task) if injection is not None else None
     world = task.world(payload)
     provider = PaymentMock()
@@ -113,6 +119,8 @@ def _run(task: UserTask, injection: InjectionTask | None, config: str) -> Outcom
             task.id, task.prompt, planner, env, leak_ticket_bodies=leak, run_id=run_id
         )
         outcome, reason = result.outcome, result.reason
+        if audit is not None:
+            audit += audit_rows(conn)
     effects = _effects(conn, provider)
     return Outcome(
         task=task.id,
@@ -152,14 +160,15 @@ def evaluate(
     user_tasks: tuple[UserTask, ...] = USER_TASKS,
     injection_tasks: tuple[InjectionTask, ...] = INJECTION_TASKS,
     configs: tuple[str, ...] = CONFIGS,
+    audit: list[tuple[str, str]] | None = None,
 ) -> list[Outcome]:
     rows: list[Outcome] = []
     for task in user_tasks:
         for config in configs:
-            rows.append(_run(task, None, config))
+            rows.append(_run(task, None, config, audit))
             for injection in injection_tasks:
                 if injection.payload(task) is not None:
-                    rows.append(_run(task, injection, config))
+                    rows.append(_run(task, injection, config, audit))
     return rows
 
 
@@ -305,8 +314,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=Path("results/eval.json"))
     args = parser.parse_args(argv)
     block_network()
-    rows = evaluate()
+    audit: list[tuple[str, str]] = []
+    rows = evaluate(audit=audit)
     summary = summarize(rows)
+    DEFAULT_DB.unlink(missing_ok=True)
+    write_audit(audit, DEFAULT_DB)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     meta = {
         "git_commit": _git_commit(),
@@ -320,6 +332,7 @@ def main(argv: list[str] | None = None) -> int:
     args.out.write_text(json.dumps(payload, indent=1, ensure_ascii=False), encoding="utf-8")
     print(report(rows, summary))
     print(f"\nwrote {args.out} ({len(rows)} runs, commit {meta['git_commit']})")
+    print(f"wrote {DEFAULT_DB} ({len(audit)} audit rows; `tasks.py trace <run_id>` explains one)")
     return 0
 
 

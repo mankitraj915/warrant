@@ -34,6 +34,7 @@ FUZZ = [
 ]
 EVAL = [[PY, "-m", "evals.harness"]]
 SWEEP = [[PY, "-m", "evals.sweep"]]
+TRACE = [[PY, "-m", "evals.trace"]]
 FUZZ_CHUNKS = [[PY, "scripts/fuzz_chunks.py"]]
 
 TARGETS: dict[str, list[list[str]]] = {
@@ -45,6 +46,7 @@ TARGETS: dict[str, list[list[str]]] = {
     "fuzz-chunks": FUZZ_CHUNKS,
     "eval": EVAL,
     "sweep": SWEEP,
+    "trace": TRACE,
 }
 ENV: dict[str, dict[str, str]] = {"fuzz": FUZZ_ENV}
 
