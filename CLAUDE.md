@@ -61,6 +61,8 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 
 ## Current status
 
-Phase: 1 complete; at Gate 1 (Gate 0 approved 2026-10-29). Gate 1 independent review done and
-addressed (`docs/reviews/GATE1_REVIEW.md`, D-028–D-035). Waiting for the owner's Gate 1 decision.
-See `docs/DECISIONS.md` "Phase 1 plan" and D-023 onward. `check` takes about 1.5 min.
+Phase: 2 in progress (Gate 1 approved 2026-10-30; post-fix chunked fuzz passed, D-024 amended).
+Steps 1–4 of the "Phase 2 plan" in `docs/DECISIONS.md` are done (execution/audit, approval
+binding, new tools, goodwill rule and auto-refund cap, NI harness extensions; D-037–D-040, F-2).
+Next: step 5 (suite growth to ~40 tasks, simulated approver, cap sweep), then holdout, trace CLI,
+chunked fuzz and Gate 2. `check` takes about 2.5 min.

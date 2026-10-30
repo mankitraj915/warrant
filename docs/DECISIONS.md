@@ -765,3 +765,71 @@ logged to `results/fuzz_chunks.jsonl`. 1,000 examples was sized from the first c
 Zero counterexamples. The multi-run property's invalid rate is about 11% (single-run about
 3.5%). Neither property calls `assume` or filters, so these are most likely draws Hypothesis
 abandoned for exceeding its size limit; that cause is not verified. Recorded, not tuned.
+
+## D-037 Second rule: `ticket_goodwill_credit` (Phase 2 step 4)
+
+A credit whose customer or pc comes from reading ticket T is admitted only if: `ticket_id`,
+`amount` and `reason` are trusted; every untrusted origin is in T's subject, body or existence
+(the same set Ω_T as the ownership rule); the customer is T's customer; the amount equals
+`GOODWILL_AMOUNT` (10,000 paise, a policy constant); no other credit for T is in the action
+set; T has never had a credit. Release: one bit per ticket (whether the standard credit is
+issued). Residual risk, as for F-1: ticket text can trigger or suppress the standard credit,
+never redirect or resize it (`tests/test_rule_goodwill.py::test_residual_ticket_text_can_trigger_the_credit`).
+
+Rejected: (a) a bounded *range* of amounts chosen by the agent: the amount would then be a
+function of the text via the planner, so the rule would release more than one bit; (b) a
+credit to any customer named by the ticket: the target would be selected by untrusted data,
+which is what the invariant forbids.
+
+## D-038 Auto-refund cap is a rule parameter, default `None`
+
+`kernel/declassify.py: AUTO_REFUND_CAP`. Above the cap the ownership rule does not admit
+(reason "amount X exceeds the auto-refund cap C"), so the action goes to approval. Per owner
+decision 2, no default is chosen before the sweep curve (step 5).
+
+## D-039 NI harness for the Phase 2 tools
+
+- **Effects** compared by NI-3 now include `credits` rows and ticket closures as well as
+  provider refunds (`tests/ni_properties.py: effects(provider, db)`); NI-5 compares all three
+  with the approved set.
+- **NI-2** checks the goodwill rule's endorsed origins against Ω_T, as for ownership.
+- **NI-4** checks the goodwill postcondition independently: credit to T's customer, the
+  standard amount, an allowed reason, no earlier credit for T, one credit for T in the run.
+- **Fuzzer shapes** (`planners/fuzz.py`): credits and closures under a ticket read, triggered
+  by nothing, by the ticket's text, or (outside any ticket read, at most once) by order-note
+  text; ticket ids taken from the read record (`tk.id`); extraction from `subject`; filters
+  whose source is a map. Multi-run: a credit scenario (a quarter of examples) runs the goodwill
+  plan in both runs; refund scenarios add a first-run trusted full refund of 7001, which is
+  the precondition for a second rule-admitted refund on the same ticket.
+- **Mutants added:** "goodwill rule ignores origin set", "goodwill rule ignores amount"; both
+  caught at the 600-example mutant budget. The pre-existing multi-run mutants stopped being
+  caught when credit plans first diluted the multi-run draws; the scenario split and the
+  full-refund kind restored them. Weights were tuned until each mutant was caught on the
+  derandomized mutant stream; that is what the weights are for, and the 20,000-example fuzz
+  is the coverage claim.
+- **Mutant rejected as equivalent:** "credits drop once-per-ticket across runs" (patching
+  `TrustedReader.ticket_has_credit`). The `credits.idempotency_key` UNIQUE constraint
+  (`credit:T`) already prevents a second credit for T, so the mutant cannot produce a
+  violating effect; see D-040.
+
+## D-040 Finding: local effects whose precondition was lost after the re-check
+
+Writing the mutant above showed that a second credit for a ticket that got past the
+pre-execution re-check raised an uncaught `sqlite3.IntegrityError` out of `run_plan` (no audit
+row, no outcome), and that `close_ticket` on a ticket that was no longer open "executed"
+while changing nothing. Reachable only if another writer acts between the re-check and the
+write. Fix (`kernel/execution.py: _execute_local`): `INSERT OR IGNORE` and a row-count check;
+if nothing was written the run stops as `aborted` (or `partial`), like a refund the provider
+did not perform. Regression tests, which fail on the old code:
+`tests/test_execution_recovery.py::test_duplicate_credit_after_recheck_aborts_cleanly` and
+`::test_closing_a_closed_ticket_after_recheck_aborts`.
+
+## F-2 Finding: a ticket id taken from the read record is untrusted
+
+`ticket_id=tk.id` (the read record's own id) carries the row's existence origin
+`tickets[T].@row` (D-028, D-036), so both rules reject it ("ticket_id is untrusted") and the
+action goes to approval, even though the value equals the operator-supplied literal. Seen in
+the step 4 probe of fuzz plans. A planner that writes the literal is unaffected. Not fixed:
+admitting `ticket_id` with origins ⊆ {`tickets[T].@row`} for T = its own value would be a
+rule change; it is recorded as a utility cost to measure in step 5 (gullible and LLM
+planners may use `tk.id`).

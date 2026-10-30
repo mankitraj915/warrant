@@ -6,6 +6,7 @@ patched names are the kernel's extension points for exactly this test.
 """
 
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -47,6 +48,19 @@ def _rule_ignores_origins(action: Any, components: Any, actions: Any, reader: An
     return _rule(action, {n: BOTTOM for n in components}, actions, reader)
 
 
+_goodwill = kernel.declassify.ticket_goodwill_credit
+
+
+def _goodwill_ignores_origins(action: Any, components: Any, actions: Any, reader: Any) -> Any:
+    return _goodwill(action, {n: BOTTOM for n in components}, actions, reader)
+
+
+def _goodwill_ignores_amount(action: Any, components: Any, actions: Any, reader: Any) -> Any:
+    """Admits whenever the amount is the only reason found (later checks skipped)."""
+    d = _goodwill(action, components, actions, reader)
+    return replace(d, admitted=True) if d.reason.startswith("amount is not") else d
+
+
 def _never(self: Any, *args: Any) -> bool:
     return False
 
@@ -77,6 +91,17 @@ MUTANTS: dict[str, tuple[Any, str, Any]] = {
         kernel.policy,
         "ticket_order_ownership",
         _rule_ignores_origins,
+    ),
+    # Phase 2: the goodwill credit rule.
+    "goodwill rule ignores origin set": (
+        kernel.policy,
+        "ticket_goodwill_credit",
+        _goodwill_ignores_origins,
+    ),
+    "goodwill rule ignores amount": (
+        kernel.policy,
+        "ticket_goodwill_credit",
+        _goodwill_ignores_amount,
     ),
 }
 MULTIRUN_MUTANTS: dict[str, tuple[Any, str, Any]] = {

@@ -463,9 +463,42 @@ Applies to `issue_refund(ticket_id, order_id, amount)`.
   untrusted field. With `θ = 0` the case always goes to approval. The cost is approval burden
   on benign multi-order customers, which Phase 1 measures.
 
-Other candidate rules for Phase 2, to stay within 2–4: a bounded goodwill credit to the case's
-customer, chosen from a fixed enum. Incident-based bulk refunds need **no** rule: incident →
-affected orders is trusted structured authority.
+- **Auto-refund cap** (Phase 2, D-038): `AUTO_REFUND_CAP` in paise, default `None`. Above it the
+  rule does not admit, so the refund goes to approval. The value is chosen from a sweep curve,
+  not before it.
+
+Incident-based bulk refunds need **no** rule: incident → affected orders is trusted structured
+authority (`incident_orders`).
+
+### 6.3 Rule `ticket_goodwill_credit` (Phase 2, D-037)
+
+- **Applies to** `issue_credit(ticket_id, customer_id, amount, reason)`.
+- **Admits** when `ticket_id`, `amount` and `reason` are trusted; every untrusted origin of any
+  component (including `pc`) is in `Ω_T = {tickets[T].subject, tickets[T].body, tickets[T].@row}`;
+  the customer is `T`'s customer; the amount is `GOODWILL_AMOUNT` (10,000 paise); no other
+  credit for `T` is in `A`; and `T` has never had a credit.
+- **One sentence:** *ticket text may trigger the standard goodwill credit to that ticket's own
+  customer, once per ticket.*
+- **Release:** one bit per ticket, whether the rule admits; projection `(rule, site, outcome)`.
+- **Postcondition** (NI-4): credit to `T`'s customer, for the standard amount, with an allowed
+  reason, the only credit ever for `T`.
+- **Residual risk:** triggering or suppression of the standard credit, as for F-1. Never
+  redirection or a different amount.
+
+### 6.4 Phase 2 tools and their policies
+
+| Tool | Kind | BLOCK (P3) | Notes |
+|---|---|---|---|
+| `incident_orders(incident_id)` | read | | staff-written, trusted |
+| `order_stats()` | read | | groups with fewer than `MIN_GROUP` orders suppressed; sinks `{operator}` |
+| `close_ticket(ticket_id, resolution)` | consequential | missing or closed ticket, resolution not in the enum, same ticket twice in `A` | no rule: untrusted pc or args go to approval |
+| `issue_credit(ticket_id, customer_id, amount, reason)` | consequential | not the ticket's customer, amount ≤ 0 or > `CREDIT_MAX`, reason not in the enum, two credits for one ticket in `A`, ticket already credited | rule `ticket_goodwill_credit` |
+
+P5 is enforced from Phase 2: refunds and credits have sink `customer:C`, so an aggregate (sinks
+`{operator}`) in any argument or in `pc` gives BLOCK. Strings in consequential arguments are
+NFC-normalised at resolution. Local effects (credits, closures) are one transaction each; if
+the write's precondition no longer holds (another writer got there after the re-check), the
+run stops as `aborted` or `partial` (D-040).
 
 ---
 
@@ -651,5 +684,9 @@ This closes laundering across runs.
 | `MAX_EXTRACT` | 5 | extractor list length |
 | `MAX_ORIGINS` | 32 | collapse to `★` |
 | `θ` | 0 | ownership-rule ambiguity threshold (minor units) |
+| `AUTO_REFUND_CAP` | `None` | ownership rule; chosen from the step 5 sweep |
+| `GOODWILL_AMOUNT` | 10,000 | goodwill rule; the only amount it admits |
+| `CREDIT_MAX` | 50,000 | P3 limit on any credit |
+| `MIN_GROUP` | 5 | smallest group `order_stats` reports |
 
 All are provisional until Phase 1 measures them.

@@ -55,26 +55,28 @@ class _Unknown:
 UNKNOWN = _Unknown()
 
 
-def _execute_local(action: ResolvedAction, db: sqlite3.Connection) -> Executed:
-    """Effects that only write this database (no provider): one transaction each."""
+def _execute_local(action: ResolvedAction, db: sqlite3.Connection) -> Executed | None:
+    """Effects that only write this database (no provider): one transaction each.
+    None if the write's precondition no longer holds (another writer got there
+    after the re-check): the ticket is not open, or it already has a credit."""
     args = action.canonical_args()
     ticket = int(args["ticket_id"])
     if action.tool == "close_ticket":
         key = f"close:{ticket}"
-        db.execute(
+        changed = db.execute(
             "UPDATE tickets SET status = 'closed', resolution = ? WHERE id = ? AND status = 'open'",
             (args["resolution"], ticket),
-        )
+        ).rowcount
     else:
         assert action.tool == "issue_credit"
         key = f"credit:{ticket}"
-        db.execute(
-            "INSERT INTO credits (ticket_id, customer_id, amount, reason, idempotency_key)"
-            " VALUES (?, ?, ?, ?, ?)",
+        changed = db.execute(
+            "INSERT OR IGNORE INTO credits"
+            " (ticket_id, customer_id, amount, reason, idempotency_key) VALUES (?, ?, ?, ?, ?)",
             (ticket, int(args["customer_id"]), int(args["amount"]), args["reason"], key),
-        )
+        ).rowcount
     db.commit()
-    return Executed(action.site, action.tool, key, "local")
+    return Executed(action.site, action.tool, key, "local") if changed == 1 else None
 
 
 def recover(db: sqlite3.Connection, provider: PaymentProvider) -> None:
@@ -110,7 +112,10 @@ def execute(
         if now.kind != decided.kind:
             return ("partial" if done else "aborted"), done
         if action.tool != "issue_refund":
-            done.append(_execute_local(action, db))
+            local = _execute_local(action, db)
+            if local is None:
+                return ("partial" if done else "aborted"), done
+            done.append(local)
             continue
         args = action.canonical_args()
         ticket, order, amount = int(args["ticket_id"]), int(args["order_id"]), int(args["amount"])

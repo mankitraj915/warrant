@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from .declassify import RuleDecision, ticket_order_ownership
+from .declassify import RuleDecision, ticket_goodwill_credit, ticket_order_ownership
 from .interpreter import ResolvedAction
 from .labels import Label
 from .tools.database import CREDIT_MAX, TrustedReader
@@ -150,7 +150,10 @@ def decide_one(
     """Verdict for one action in the context of the whole set, and any rule decision."""
     comps = components(action)
     untrusted = {n: lbl for n, lbl in comps.items() if not lbl.trusted}
-    decision = ticket_order_ownership(action, comps, actions, reader) if untrusted else None
+    rule = {"issue_refund": ticket_order_ownership, "issue_credit": ticket_goodwill_credit}.get(
+        action.tool
+    )
+    decision = rule(action, comps, actions, reader) if untrusted and rule else None
     block = _block_reason(action, actions, reader)
     if block is not None:
         return Verdict("BLOCK", block), decision

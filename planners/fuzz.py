@@ -11,7 +11,9 @@
   tainted predicate, tainted index, tainted amount arithmetic, nested
   map/filter, literal-argument calls in tainted maps, text from other origins,
   trusted actions mixed with tainted ones, actions under a read of a ticket
-  that may not exist). Selection and index shapes are also driven by order-note
+  that may not exist, credits and closures under a ticket read, ticket ids
+  taken from the read record, text from ``subject``, filters over maps).
+  Selection and index shapes are also driven by order-note
   text, outside any ticket read, so label bugs cannot hide behind the ownership
   rule. Amounts and predicates inside the
   shapes are drawn from a type-directed expression generator.
@@ -178,7 +180,10 @@ def _shape(draw: Draw, world: World, n: _Names) -> list[Json]:
     t_id, c_id, o_id = _ids(draw, world)
     t, tk, oids, o, amt = n("t"), n("tk"), n("oids"), n("o"), n("amt")
     read = call("read_ticket", t, ticket_id=lit(t_id))
-    extract = call("extract_order_ids", oids, text=ref(tk, "body"))
+    field = draw(st.sampled_from(["body", "body", "body", "subject"]))
+    extract = call("extract_order_ids", oids, text=ref(tk, field))
+    # The ticket id inside a ticket read: the literal, or the read record's own id.
+    t_arg = draw(st.sampled_from([lit(t_id), lit(t_id), ref(tk, "id")]))
     kind = draw(
         st.sampled_from(
             [
@@ -193,6 +198,10 @@ def _shape(draw: Draw, world: World, n: _Names) -> list[Json]:
                 "note_select",
                 "note_index",
                 "probe",
+                "filter_map",
+                "credit",
+                "credit",
+                "close",
             ]
         )
     )
@@ -201,9 +210,50 @@ def _shape(draw: Draw, world: World, n: _Names) -> list[Json]:
             ref(oids),
             o,
             call("compute_refund_amount", amt, order_id=ref(o)),
-            _refund(lit(t_id), ref(o), _amount(draw, [ref(amt)])),
+            _refund(t_arg, ref(o), _amount(draw, [ref(amt)])),
         )
         return [read, expr(map_(ref(t), tk, extract, expr(body)))]
+    if kind in ("credit", "close"):  # the Phase 2 consequential tools
+        x = n("x")
+        # Under a ticket read (possibly triggered by its text), or triggered by
+        # order-note text with no ticket read (map nesting is limited to 2).
+        trigger = draw(st.sampled_from(["none", "ticket", "note", "note"]))
+        in_read = trigger != "note"
+        ticket_arg = t_arg if in_read else lit(t_id)
+        if kind == "credit":
+            # The standard amount, others within the credit limit, or arbitrary;
+            # mostly standard when triggered by notes, so origin checks are reached.
+            standard = [lit(10_000)] * (2 if in_read else 6)
+            amount = draw(st.sampled_from([*standard, lit(5_000), lit(50_000), None]))
+            amount = amount or _amount(draw, [])
+            reason = draw(st.sampled_from(["goodwill", "goodwill", "late_delivery", "because"]))
+            customers = [ref(tk, "customer_id")] * 2 if in_read else []
+            customer = draw(st.sampled_from([*customers, lit(c_id)]))
+            action = call(
+                "issue_credit",
+                ticket_id=ticket_arg,
+                customer_id=customer,
+                amount=amount,
+                reason=lit(reason),
+            )
+        else:
+            from_text = [ref(tk, field)] if in_read else []
+            resolution = draw(
+                st.sampled_from([lit("refunded"), lit("no_action"), lit("bogus"), *from_text])
+            )
+            action = call("close_ticket", ticket_id=ticket_arg, resolution=resolution)
+        if trigger == "ticket":  # triggered by the ticket's own text
+            return [read, expr(map_(ref(t), tk, extract, expr(map_(ref(oids), x, action))))]
+        if trigger == "note":  # at most once: the first id in one order's note
+            orders, first = n("orders"), n("first")
+            note_ids = call("extract_order_ids", oids, text=ref(o, "customer_note"))
+            once = map_(op("at", ref(oids), lit(0)), x, action)
+            return [
+                call("query_orders", orders, customer_id=lit(c_id)),
+                expr(op("at", ref(orders), lit(draw(st.sampled_from([0, 1])))), first),
+                expr(map_(ref(first), o, note_ids, expr(once))),
+            ]
+        return [read, expr(map_(ref(t), tk, action))]
     if kind == "note":  # ids from order notes, i.e. not from the case ticket
         orders, x = n("orders"), n("x")
         note_ids = call("extract_order_ids", oids, text=ref(o, "customer_note"))
@@ -212,9 +262,13 @@ def _shape(draw: Draw, world: World, n: _Names) -> list[Json]:
             call("query_orders", orders, customer_id=lit(c_id)),
             expr(map_(ref(orders), o, note_ids, expr(body))),
         ]
-    if kind in ("select", "nested"):  # selection by a tainted predicate
+    if kind in ("select", "nested", "filter_map"):  # selection by a tainted predicate
         orders, sel, s = n("orders"), n("sel"), n("s")
         pred = _predicate(draw, o, [ref(oids)])
+        source = ref(orders)
+        if kind == "filter_map":  # the filter's source is itself a map
+            y = n("y")
+            source = map_(ref(orders), y, expr(ref(y)))
         customer = ref(tk, "customer_id") if kind == "nested" else lit(c_id)
         if draw(st.booleans()):  # act on the selected record
             action = _refund_rec(t_id, s, draw)
@@ -228,7 +282,7 @@ def _shape(draw: Draw, world: World, n: _Names) -> list[Json]:
                     tk,
                     extract,
                     call("query_orders", orders, customer_id=customer),
-                    expr(filter_(ref(orders), o, pred), sel),
+                    expr(filter_(source, o, pred), sel),
                     expr(map_(ref(sel), s, action)),
                 )
             ),
@@ -257,7 +311,7 @@ def _shape(draw: Draw, world: World, n: _Names) -> list[Json]:
             ref(oids),
             x,
             call("compute_refund_amount", amt, order_id=ref(x)),
-            _refund(lit(t_id), lit(o_id), _amount(draw, [ref(amt)])),
+            _refund(t_arg, lit(o_id), _amount(draw, [ref(amt)])),
         )
         return [read, expr(map_(ref(t), tk, extract, expr(body)))]
     if kind in ("note_select", "note_index"):  # selection by order-note text
@@ -287,7 +341,7 @@ def _shape(draw: Draw, world: World, n: _Names) -> list[Json]:
         return [probe, expr(map_(ref(t), tk, _refund(lit(t_id), lit(o_id), _amount(draw, []))))]
     if kind == "literal":  # all-literal call inside a tainted map
         x = n("x")
-        body = map_(ref(oids), x, _refund(lit(t_id), lit(o_id), _amount(draw, [])))
+        body = map_(ref(oids), x, _refund(t_arg, lit(o_id), _amount(draw, [])))
         return [read, expr(map_(ref(t), tk, extract, expr(body)))]
     return [_refund(lit(t_id), lit(o_id), _amount(draw, []))]  # trusted only
 

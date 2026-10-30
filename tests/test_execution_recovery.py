@@ -14,6 +14,8 @@ import pytest
 from domain.payment_mock import PaymentMock
 from domain.seed import materialize
 from kernel.run import Environment, run_plan
+from kernel.tools.database import TrustedReader
+from planners.builders import call, credit_ticket_customer, lit, plan
 from planners.fuzz import CASE_TICKET, _case_world, raw_extractor
 from planners.oracle import refund_in_full
 
@@ -81,3 +83,31 @@ def test_pending_row_with_unknown_status_stays_and_blocks() -> None:
     again = run_plan(plan, env, run_id="provider-down")
     assert again.outcome == "blocked"
     assert [r[3] for r in _rows(env)] == ["pending"]
+
+
+# --- local effects whose precondition changed after the last re-check ----------------
+
+
+def _race(monkeypatch: pytest.MonkeyPatch, method: str) -> None:
+    """Another writer acts between the re-check and the write: the re-check no
+    longer sees the conflicting row."""
+    monkeypatch.setattr(TrustedReader, method, lambda self, *a: False)
+
+
+def test_duplicate_credit_after_recheck_aborts_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
+    env = Environment(materialize(_case_world(1, "delivered")), PaymentMock(), raw_extractor)
+    assert run_plan(credit_ticket_customer(CASE_TICKET), env, run_id="r-1").outcome == "executed"
+    _race(monkeypatch, "ticket_has_credit")
+    r = run_plan(credit_ticket_customer(CASE_TICKET), env, run_id="r-2")
+    assert r.outcome == "aborted"
+    assert env.db.execute("SELECT COUNT(*) FROM credits").fetchone() == (1,)
+    assert env.db.execute("SELECT COUNT(*) FROM audit WHERE run_id = 'r-2'").fetchone() == (1,)
+
+
+def test_closing_a_closed_ticket_after_recheck_aborts(monkeypatch: pytest.MonkeyPatch) -> None:
+    env = Environment(materialize(_case_world(1, "delivered")), PaymentMock(), raw_extractor)
+    close = plan(call("close_ticket", ticket_id=lit(CASE_TICKET), resolution=lit("no_action")))
+    assert run_plan(close, env, run_id="r-1").outcome == "executed"
+    monkeypatch.setattr(TrustedReader, "ticket_status", lambda self, *a: "open")
+    r = run_plan(close, env, run_id="r-2")
+    assert r.outcome == "aborted" and r.executed == ()

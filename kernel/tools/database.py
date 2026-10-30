@@ -25,6 +25,7 @@ REFUND_WINDOW_DAYS = 30
 MAX_LIST = 100
 MIN_GROUP = 5  # aggregate rows over fewer orders are suppressed (SPEC §4.8)
 CREDIT_MAX = 50_000  # paise; the largest account credit any action may issue
+GOODWILL_AMOUNT = 10_000  # paise; the standard goodwill credit (ticket_goodwill_credit)
 OPERATOR_ONLY = Label(sinks=frozenset({"operator"}))
 EXISTS = "@row"  # pseudo-column: the existence of a customer-creatable row
 # Extension point for the T08 hypothesis test (D-036); always True in use. False

@@ -18,7 +18,7 @@ from kernel.approval import Approval, digest
 from kernel.run import Environment, RunResult, run_plan
 from planners.builders import Json, refund_from_ticket_text
 from planners.fuzz import CASE_TICKET, _case_world, mutated, plans, raw_extractor, worlds
-from tests.ni_properties import NIViolation
+from tests.ni_properties import NIViolation, effects
 
 
 class ApproveAll:
@@ -131,17 +131,36 @@ def test_state_change_while_deciding_aborts() -> None:
     assert r.outcome == "aborted" and _paid(env) == []
 
 
+def _as_effects(actions: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
+    """The effects an approved action list would have, in ``effects`` order."""
+    by_tool: dict[str, list[tuple[Any, ...]]] = {"issue_refund": [], "issue_credit": []}
+    closed = []
+    for a in actions:
+        x = a["args"]
+        if a["tool"] == "issue_refund":
+            key = f"refund:{x['order_id']}:{x['ticket_id']}"
+            by_tool["issue_refund"].append((x["order_id"], x["amount"], key))
+        elif a["tool"] == "issue_credit":
+            row = ("credit", x["ticket_id"], x["customer_id"], x["amount"], x["reason"])
+            by_tool["issue_credit"].append(row)
+        else:
+            closed.append(("close", x["ticket_id"], x["resolution"]))
+    return by_tool["issue_refund"] + by_tool["issue_credit"] + sorted(closed)
+
+
 def _ni5(plan: Json, world: World) -> RunResult:
     approver = ApproveAll()
     env = _env(world, approver)
     r = run_plan(plan, env, run_id="ni5")
-    paid = _paid(env)
+    provider = env.provider
+    assert isinstance(provider, PaymentMock)
+    done = effects(provider, env.db)
     if not approver.seen:
         return r
     request, hash_ = approver.seen[0]
-    approved = [(a["args"]["order_id"], a["args"]["amount"]) for a in request["actions"]]
-    if paid and (paid != approved or digest(request) != hash_):
-        raise NIViolation(f"NI-5 executed {paid} but approved {approved}")
+    approved = _as_effects(request["actions"])
+    if done and (done != approved or digest(request) != hash_):
+        raise NIViolation(f"NI-5 executed {done} but approved {approved}")
     return r
 
 

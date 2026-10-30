@@ -15,6 +15,8 @@ from kernel.labels import cell_origin, join
 from kernel.run import RunResult
 
 OWNERSHIP = "ticket_order_ownership"
+GOODWILL = "ticket_goodwill_credit"
+GOODWILL_AMOUNT = 10_000  # restated, not imported: the oracle must not share the kernel's code
 
 
 class NIViolation(AssertionError):
@@ -38,8 +40,21 @@ def projection(r: RunResult) -> tuple[tuple[Any, ...], ...]:
     return tuple((d.rule, d.site, d.admitted) for d in r.rule_log)
 
 
-def effects(provider: PaymentMock) -> list[tuple[int, int, str]]:
-    return [(e.order_id, e.amount, e.idempotency_key) for e in provider.effects]
+def effects(provider: PaymentMock, db: sqlite3.Connection | None = None) -> list[tuple[Any, ...]]:
+    """Executed effects: money moved by the provider, in order, then (with ``db``)
+    the consequential database writes: credits and ticket closures."""
+    moved: list[tuple[Any, ...]] = [
+        (e.order_id, e.amount, e.idempotency_key) for e in provider.effects
+    ]
+    if db is None:
+        return moved
+    credits = db.execute(
+        "SELECT 'credit', ticket_id, customer_id, amount, reason FROM credits ORDER BY id"
+    ).fetchall()
+    closed = db.execute(
+        "SELECT 'close', id, resolution FROM tickets WHERE resolution IS NOT NULL ORDER BY id"
+    ).fetchall()
+    return moved + credits + closed
 
 
 def check_ni1(r1: RunResult, r2: RunResult) -> None:
@@ -49,8 +64,8 @@ def check_ni1(r1: RunResult, r2: RunResult) -> None:
         )
 
 
-# Each rule's declared endorsable origins (DESIGN §6.2), restated independently.
-def _ownership_origins(ticket: int) -> set[str]:
+# Each rule's declared endorsable origins (DESIGN §6.2, §6.3), restated independently.
+def _case_ticket_origins(ticket: int) -> set[str]:
     return {cell_origin("tickets", ticket, c) for c in ("subject", "body", "@row")}
 
 
@@ -66,8 +81,8 @@ def check_ni2(r: RunResult) -> None:
             continue
         if admitted.get(a.site) is None or admitted[a.site] != v.rule:
             raise NIViolation(f"NI-2 untrusted action allowed without a rule: {a.site} {v}")
-        if v.rule == OWNERSHIP:
-            allowed = _ownership_origins(int(a.canonical_args()["ticket_id"]))
+        if v.rule in (OWNERSHIP, GOODWILL):
+            allowed = _case_ticket_origins(int(a.canonical_args()["ticket_id"]))
             origins = join(*a.component_labels().values()).untrusted
             if not origins <= allowed:
                 raise NIViolation(f"NI-2 endorsed origins {sorted(origins)} outside the rule's set")
@@ -100,15 +115,16 @@ def _eligible(db: sqlite3.Connection, customer_id: int) -> set[int]:
 
 
 def check_ni4(r: RunResult, pre: sqlite3.Connection) -> None:
-    """Every executed refund admitted by the ownership rule meets its postcondition."""
+    """Every executed action admitted by a rule meets that rule's postcondition."""
     if r.outcome not in ("executed", "partial", "indeterminate"):
         return
-    by_ticket: dict[int, int] = {}
+    by_ticket: dict[tuple[str, int], int] = {}
     for a in r.actions:
-        if a.tool == "issue_refund":
-            t = int(a.canonical_args()["ticket_id"])
-            by_ticket[t] = by_ticket.get(t, 0) + 1
+        key = (a.tool, int(a.canonical_args().get("ticket_id", -1)))
+        by_ticket[key] = by_ticket.get(key, 0) + 1
     for a, v in zip(r.actions, r.verdicts, strict=True):
+        if v.rule == GOODWILL:
+            _check_goodwill(a.canonical_args(), pre, by_ticket)
         if v.rule != OWNERSHIP:
             continue
         args = a.canonical_args()
@@ -123,7 +139,29 @@ def check_ni4(r: RunResult, pre: sqlite3.Connection) -> None:
             problems.append("ticket already had a refund")
         if pre.execute("SELECT 1 FROM refunds WHERE order_id = ?", (order,)).fetchone():
             problems.append("order already had a refund")
-        if by_ticket[ticket] != 1:
+        if by_ticket[("issue_refund", ticket)] != 1:
             problems.append("more than one refund for the ticket in this run")
         if problems:
             raise NIViolation(f"NI-4 postcondition failed for {args}: {problems}")
+
+
+def _check_goodwill(
+    args: dict[str, Any], pre: sqlite3.Connection, by_ticket: dict[tuple[str, int], int]
+) -> None:
+    """ticket_goodwill_credit: the standard amount, to the ticket's own customer,
+    for an allowed reason, once per ticket."""
+    ticket = int(args["ticket_id"])
+    row = pre.execute("SELECT customer_id FROM tickets WHERE id = ?", (ticket,)).fetchone()
+    problems = []
+    if row is None or int(args["customer_id"]) != row[0]:
+        problems.append("credit is not to the ticket's customer")
+    if int(args["amount"]) != GOODWILL_AMOUNT:
+        problems.append("amount is not the standard goodwill amount")
+    if args["reason"] not in ("goodwill", "late_delivery"):
+        problems.append("reason is not an allowed credit reason")
+    if pre.execute("SELECT 1 FROM credits WHERE ticket_id = ?", (ticket,)).fetchone():
+        problems.append("ticket already had a credit")
+    if by_ticket[("issue_credit", ticket)] != 1:
+        problems.append("more than one credit for the ticket in this run")
+    if problems:
+        raise NIViolation(f"NI-4 goodwill postcondition failed for {args}: {problems}")

@@ -24,7 +24,7 @@ from hypothesis import strategies as st
 from domain.payment_mock import PaymentMock
 from domain.seed import Ticket, World, materialize
 from kernel.run import Environment, run_plan
-from planners.builders import Json, refund_from_ticket_text
+from planners.builders import Json, credit_ticket_customer, refund_from_ticket_text
 from planners.fuzz import (
     CASE_CUSTOMER,
     CASE_TICKET,
@@ -44,7 +44,7 @@ from tests.ni_properties import (
     effects,
     projection,
 )
-from tests.support import run_world
+from tests.support import run_world_env
 
 NEW_TICKET = 4002
 
@@ -54,9 +54,9 @@ def ni_property(data: Any) -> None:
     plan: Json = data.draw(plans(world), label="plan")
     w1 = data.draw(mutated(world), label="E1")
     w2 = data.draw(mutated(world), label="E2")
-    r1, p1, pre1 = run_world(plan, w1)
-    r2, p2, pre2 = run_world(plan, w2)
-    x1, x2 = effects(p1), effects(p2)
+    r1, env1, pre1 = run_world_env(plan, w1)
+    r2, env2, pre2 = run_world_env(plan, w2)
+    x1, x2 = _effects(env1), _effects(env2)
 
     consulted = bool(r1.rule_log or r2.rule_log)
     equal = projection(r1) == projection(r2)
@@ -73,6 +73,11 @@ def ni_property(data: Any) -> None:
     check_ni4(r2, pre2)
 
 
+def _effects(env: Environment) -> list[tuple[Any, ...]]:
+    assert isinstance(env.provider, PaymentMock)
+    return effects(env.provider, env.db)
+
+
 @given(st.data())
 def test_noninterference(data: Any) -> None:
     ni_property(data)
@@ -84,11 +89,18 @@ def _snapshot(db: sqlite3.Connection) -> sqlite3.Connection:
     return copy
 
 
-def _run_plan(data: Any, world: World, tickets: list[int], first: bool) -> Json:
+def _run_plan(data: Any, world: World, tickets: list[int], first: bool, credit: bool) -> Json:
     """A random plan, or one of the paths cross-run state matters for, weighted
-    towards them: trusted partial or full refunds (mostly in the first run) and
-    the canonical data-dependent plan (mostly in the second)."""
-    kinds = ["trusted"] * 3 + ["canonical"] * 2 if first else ["canonical"] * 3 + ["trusted"]
+    towards them: trusted partial or full refunds (mostly in the first run; a
+    full refund of 7001 is what lets a second, rule-admitted refund follow) and
+    the canonical data-dependent plan (mostly in the second); in a credit
+    scenario, the goodwill credit plan in both runs."""
+    if credit:
+        kinds = ["credit"] * 5
+    elif first:
+        kinds = ["trusted"] * 2 + ["clear_other"] * 2 + ["canonical"] * 2
+    else:
+        kinds = ["canonical"] * 3 + ["trusted"]
     kind = data.draw(st.sampled_from(["random", *kinds]), label="plan kind")
     ticket = data.draw(st.sampled_from(tickets), label="plan ticket")
     event(f"run {1 if first else 2} plan={kind} ticket={ticket}")
@@ -97,8 +109,14 @@ def _run_plan(data: Any, world: World, tickets: list[int], first: bool) -> Json:
         return plan
     if kind == "canonical":
         return refund_from_ticket_text(ticket)
+    if kind == "clear_other":  # refund 7001 in full, leaving 7000 the unique eligible order
+        return refund_amount(ticket, 7001, 450_000)
+    if kind == "credit":  # the standard credit to the ticket's customer, via the ticket read
+        return credit_ticket_customer(ticket)
     order = data.draw(st.sampled_from([7000, 7001]), label="order")
-    amount = data.draw(st.sampled_from([10_000, 10_000, 120_000, 450_000]), label="amount")
+    # Partial, full (which leaves the other order the unique eligible one), or too much.
+    full = {7000: 120_000, 7001: 450_000}[order]
+    amount = data.draw(st.sampled_from([10_000, 10_000, full, full, 450_000]), label="amount")
     return refund_amount(ticket, order, amount)
 
 
@@ -119,7 +137,8 @@ def multirun_property(data: Any) -> None:
     if failure is not None:
         provider.inject(failure)
     pre1 = _snapshot(env.db)
-    plan1 = _run_plan(data, world, [CASE_TICKET], first=True)
+    credit = data.draw(st.sampled_from([False, False, False, True]), label="credit scenario")
+    plan1 = _run_plan(data, world, [CASE_TICKET], first=True, credit=credit)
     r1 = run_plan(plan1, env, run_id="run-1")
     check_ni2(r1)
     check_ni4(r1, pre1)
@@ -128,7 +147,7 @@ def multirun_property(data: Any) -> None:
     env.db.execute("UPDATE tickets SET body = ? WHERE id = ?", (case_body, CASE_TICKET))
     later, tickets = world, [CASE_TICKET]
     if data.draw(st.sampled_from([True, True, False]), label="open a new ticket"):
-        tickets = [NEW_TICKET, NEW_TICKET, NEW_TICKET, CASE_TICKET]
+        tickets = [NEW_TICKET, NEW_TICKET, CASE_TICKET, CASE_TICKET]
         body = data.draw(_ticket_text(world), label="new ticket body")
         env.db.execute(
             "INSERT INTO tickets (id, customer_id, subject, body, status)"
@@ -138,7 +157,7 @@ def multirun_property(data: Any) -> None:
         later = world.extend(tickets=(Ticket(NEW_TICKET, CASE_CUSTOMER, "again", body),))
     env.db.commit()
     pre2 = _snapshot(env.db)
-    plan2 = _run_plan(data, later, tickets, first=False)
+    plan2 = _run_plan(data, later, tickets, first=False, credit=credit)
     r2 = run_plan(plan2, env, run_id="run-2")
     event(f"failure={failure}")
     event(f"runs {r1.outcome}/{r2.outcome}")

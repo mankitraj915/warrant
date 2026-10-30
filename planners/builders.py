@@ -65,3 +65,23 @@ def refund_from_ticket_text(ticket_id: int) -> Json:
             )
         ),
     )
+
+
+def credit_ticket_customer(ticket_id: int, amount: int = 10_000, reason: str = "goodwill") -> Json:
+    """ "Give the customer who opened the ticket the standard goodwill credit."""
+    return plan(
+        call("read_ticket", "t", ticket_id=lit(ticket_id)),
+        expr(
+            map_(
+                ref("t"),
+                "tk",
+                call(
+                    "issue_credit",
+                    ticket_id=lit(ticket_id),
+                    customer_id=ref("tk", "customer_id"),
+                    amount=lit(amount),
+                    reason=lit(reason),
+                ),
+            )
+        ),
+    )
