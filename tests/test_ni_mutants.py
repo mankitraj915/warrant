@@ -84,10 +84,11 @@ MUTANTS: dict[str, tuple[Any, str, Any]] = {
     "at ignores index label": (kernel.interpreter, "at_structure_label", _at_ignores_index),
     "policy ignores pc": (kernel.policy, "PC_IS_A_COMPONENT", False),
     "ownership rule drops uniqueness": (kernel.declassify, "REQUIRE_UNIQUE_ELIGIBLE", False),
-    # Gate 1 decision 3: point reads of a trusted ticket id without the existence taint.
-    "point ticket read drops existence origin": (
+    # Gate 1 decision 3 / D-054: point reads of a trusted ticket id carry no existence
+    # taint only because a missing row halts the run; without the halt it is unsound.
+    "point read of a missing trusted ticket does not halt": (
         kernel.tools.database,
-        "POINT_READ_EXISTENCE",
+        "HALT_ON_ABSENT_TRUSTED_TICKET",
         False,
     ),
     # Added after the Gate 1 review (findings 2, 3 and 6).

@@ -9,7 +9,7 @@ Plus: a state change while the human is deciding aborts the run (re-check).
 
 from typing import Any
 
-from hypothesis import given
+from hypothesis import event, given
 from hypothesis import strategies as st
 
 from domain.payment_mock import PaymentMock
@@ -17,8 +17,8 @@ from domain.seed import World, materialize
 from kernel.approval import Approval, digest
 from kernel.run import Environment, RunResult, run_plan
 from planners.builders import Json, refund_from_ticket_text
-from planners.fuzz import CASE_TICKET, _case_world, mutated, plans, raw_extractor, worlds
-from tests.ni_properties import NIViolation, effects
+from planners.fuzz import CASE_TICKET, _case_world, mutated, raw_extractor, sourced_plans, worlds
+from tests.ni_properties import NIViolation, coverage_events, effects
 
 
 class ApproveAll:
@@ -166,7 +166,10 @@ def _ni5(plan: Json, world: World) -> RunResult:
 
 def ni5_property(data: Any) -> None:
     world = data.draw(worlds(), label="world")
-    _ni5(data.draw(plans(world), label="plan"), data.draw(mutated(world), label="E"))
+    source, plan = data.draw(sourced_plans(world), label="plan")
+    coverage_events(source, plan)
+    r = _ni5(plan, data.draw(mutated(world), label="E"))
+    event(f"[{source}] halted={r.outcome == 'halted'}")
 
 
 @given(st.data())

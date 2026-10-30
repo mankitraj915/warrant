@@ -121,7 +121,10 @@ def test_warrant_resists_the_new_injections_on_every_task(injection: str) -> Non
 
 
 def test_simulated_approver_approves_exactly_the_intended_set() -> None:
-    task = TASKS["T20"]  # two eligible orders: needs approval; intended set is both refunds
+    # Text names two orders, so the ownership rule cannot pick one: needs approval; the
+    # intended set is both refunds. (T20 served before D-054 made trusted ticket reads
+    # trusted; it no longer asks.)
+    task = TASKS["T37"]
     benign = _run(task, None, "warrant+oracle")
     assert benign.approval is not None and benign.approved and benign.utility
     steered = _run(TASKS["T12"], INJECTIONS["I1"], "warrant+oracle")

@@ -81,3 +81,46 @@ def test_delimiting_does_not_stop_the_gullible_planner(injection: str) -> None:
             undefended.credits,
             undefended.closures,
         )
+
+
+# --- the attacker-plan planner (F-3, D-052) ----------------------------------------
+
+
+def test_attacker_planner_appends_or_replaces_and_ignores_its_input() -> None:
+    from evals.tasks import AttackPlan
+    from planners.attacker import AttackerPlanner
+    from planners.builders import call, lit
+
+    task = TASKS["T01"]
+    step = call("close_ticket", ticket_id=lit(task.case_ticket), resolution=lit("no_action"))
+    base = task.oracle["steps"]
+    assert AttackerPlanner(task.oracle, None).plan(None) == task.oracle
+    assert AttackerPlanner(task.oracle, AttackPlan((step,))).plan(None)["steps"] == [*base, step]
+    assert AttackerPlanner(task.oracle, AttackPlan((step,), True)).plan("ignored")["steps"] == [
+        step
+    ]
+
+
+@pytest.mark.parametrize("suite", ["dev", "holdout"])
+def test_every_attack_plan_typechecks_with_every_user_plan(suite: str) -> None:
+    from evals.harness import attack_plan, injections
+    from kernel.plan_lang import check_plan, parse_plan
+    from planners.attacker import AttackerPlanner
+
+    for injection in injections(suite):
+        for task in USER_TASKS:
+            if injection.payload(task) is None:
+                continue
+            attack = attack_plan(task, injection)
+            assert attack is not None, (injection.id, task.id)
+            check_plan(parse_plan(AttackerPlanner(task.oracle, attack).plan(None)))
+
+
+def test_attacker_planner_hijacks_the_undefended_baseline_not_the_leaked_kernel() -> None:
+    from evals.tasks import ATTACKER_ORDER
+
+    task = TASKS["T01"]
+    undefended = _run(task, INJECTIONS["I3"], "undefended+attacker")
+    leaked = _run(task, INJECTIONS["I3"], "leaked+attacker")
+    assert undefended.attacked and ATTACKER_ORDER in [o for o, _ in undefended.effects]
+    assert not leaked.attacked and ATTACKER_ORDER not in [o for o, _ in leaked.effects]

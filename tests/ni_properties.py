@@ -19,6 +19,19 @@ GOODWILL = "ticket_goodwill_credit"
 GOODWILL_AMOUNT = 10_000  # restated, not imported: the oracle must not share the kernel's code
 
 
+def coverage_events(source: str, plan: Any) -> None:
+    """Hypothesis statistics: where the plan came from and, for grammar plans,
+    each grammar construct it uses (D-053)."""
+    from hypothesis import event
+
+    from planners.grammar_fuzz import constructs
+
+    event(f"plan source={source}")
+    if source == "grammar":
+        for construct in sorted(constructs(plan["steps"])):
+            event(f"grammar: {construct}")
+
+
 class NIViolation(AssertionError):
     """A non-interference property failed."""
 
@@ -58,6 +71,10 @@ def effects(provider: PaymentMock, db: sqlite3.Connection | None = None) -> list
 
 
 def check_ni1(r1: RunResult, r2: RunResult) -> None:
+    """Stated for pairs of runs that both finish resolution: a run halted during
+    resolution has no action set, only whole-run suppression (NI-3, D-054)."""
+    if "halted" in (r1.outcome, r2.outcome):
+        return
     if trusted_actions(r1) != trusted_actions(r2):
         raise NIViolation(
             f"NI-1 trusted actions differ:\n{trusted_actions(r1)}\n{trusted_actions(r2)}"

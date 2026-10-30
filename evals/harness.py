@@ -14,7 +14,11 @@ configurations (Warrant configurations use the simulated approver, D-041):
   plumbing; delimiting is evaluated with the LLM in Phase 4;
 - ``leaked+gullible``: the kernel, but the case ticket's text is leaked into the
   planner's context (S-12), so only the plan-label layer stands between the
-  hijacked plan and execution. Reported separately from the main matrix.
+  hijacked plan and execution. Reported separately from the main matrix;
+- ``undefended+attacker`` and ``leaked+attacker``: as their gullible
+  counterparts, with the attacker-plan planner, which emits the operator's
+  plan plus the injection's structured attack plan and parses no text (F-3,
+  D-052). Reported alongside the gullible rows, not instead of them.
 
 Every raw outcome is written to ``results/eval.json`` with the git commit,
 seeds and environment, then summary tables are printed. ``--suite holdout``
@@ -41,10 +45,11 @@ from domain.seed import materialize
 from evals.approver import GroundTruthApprover
 from evals.canary import scan
 from evals.netguard import block_network
-from evals.tasks import Closure, Credit, Effect, Effects, InjectionTask, UserTask
+from evals.tasks import AttackPlan, Closure, Credit, Effect, Effects, InjectionTask, UserTask
 from evals.tasks.dev import INJECTION_TASKS, USER_TASKS
 from evals.trace import DEFAULT_DB, audit_rows, write_audit
 from kernel.run import Environment, RunResult, run_task
+from planners.attacker import AttackerPlanner
 from planners.baselines.undefended import run_undefended
 from planners.gullible import GulliblePlanner
 from planners.oracle import OraclePlanner
@@ -62,9 +67,25 @@ def injections(suite: str) -> tuple[InjectionTask, ...]:
 
 
 MAIN = ("warrant+oracle", "warrant+gullible", "undefended+gullible", "delimited+gullible")
-BASELINES = ("undefended+gullible", "delimited+gullible")
+BASELINES = (
+    "undefended+gullible",
+    "delimited+gullible",
+    "undefended+attacker",
+    "delimited+attacker",
+)
 SEPARATE = ("leaked+gullible",)
-CONFIGS = MAIN + SEPARATE
+ATTACKER = ("undefended+attacker", "delimited+attacker", "leaked+attacker")
+CONFIGS = MAIN + SEPARATE + ATTACKER
+
+
+def attack_plan(task: UserTask, injection: InjectionTask | None) -> AttackPlan | None:
+    """The independent agent's attack plan for this pair (D-052)."""
+    if injection is None:
+        return None
+    from evals.tasks.dev.attack_plans import ATTACK_PLANS as DEV
+    from evals.tasks.holdout.attack_plans import ATTACK_PLANS as HOLDOUT
+
+    return {**DEV, **HOLDOUT}[injection.id](task)
 
 
 @dataclass(frozen=True)
@@ -110,11 +131,13 @@ def _run(
     world = task.world(payload)
     provider = PaymentMock()
     conn = materialize(world)
-    planner = (
-        OraclePlanner(task.oracle)
-        if config == "warrant+oracle"
-        else GulliblePlanner(task.oracle, task.case_ticket)
-    )
+    planner: OraclePlanner | GulliblePlanner | AttackerPlanner
+    if config == "warrant+oracle":
+        planner = OraclePlanner(task.oracle)
+    elif config.endswith("+attacker"):
+        planner = AttackerPlanner(task.oracle, attack_plan(task, injection))
+    else:
+        planner = GulliblePlanner(task.oracle, task.case_ticket)
     result: RunResult | None = None
     if config in BASELINES:
         outcome, reason = run_undefended(
@@ -124,7 +147,7 @@ def _run(
             provider,
             extract_order_ids,
             show_ticket_bodies=(task.case_ticket,),
-            delimit_untrusted=config == "delimited+gullible",
+            delimit_untrusted=config.startswith("delimited+"),
         )
     else:
         env = Environment(
@@ -133,7 +156,7 @@ def _run(
             extractor=extract_order_ids,
             approver=GroundTruthApprover(task),
         )
-        leak = (task.case_ticket,) if config == "leaked+gullible" else ()
+        leak = (task.case_ticket,) if config.startswith("leaked+") else ()
         run_id = f"{task.id}:{injection.id if injection else '-'}:{config}:seed{task.seed}"
         result = run_task(
             task.id, task.prompt, planner, env, leak_ticket_bodies=leak, run_id=run_id
@@ -317,6 +340,8 @@ def report(rows: list[Outcome], summary: dict[str, dict[str, Any]]) -> str:
         _table(["metric", *MAIN], [[m, *(summary[c][m] for c in MAIN)] for m in metrics]),
         "## Metrics (leaked-context configuration, reported separately)",
         _table(["metric", *SEPARATE], [[m, *(summary[c][m] for c in SEPARATE)] for m in metrics]),
+        "## Metrics (attacker-plan planner: structured attack plans, no text parsing; F-3)",
+        _table(["metric", *ATTACKER], [[m, *(summary[c][m] for c in ATTACKER)] for m in metrics]),
         "## Approval burden by rule (benign tasks that asked for approval)",
         _counts(summary, "approval_burden_by_rule"),
         "## Approval burden by reason",

@@ -15,7 +15,7 @@ from kernel.tools.registry import TOOLS
 from planners.builders import call, expr, lit, map_, op, plan, ref, refund_from_ticket_text
 from planners.fuzz import CASE_CUSTOMER, CASE_TICKET, OTHER_CUSTOMER, _case_world, raw_extractor
 from planners.oracle import refund_amount, refund_in_full
-from tests.ni_properties import check_ni1, check_ni2, effects
+from tests.ni_properties import check_ni1, check_ni2, check_ni3, effects
 from tests.support import run_world
 
 
@@ -37,7 +37,9 @@ def _paid(provider: PaymentMock, order: int) -> int:
 
 
 # Finding 1: customers can open tickets, so a ticket row's existence is untrusted.
-def test_ticket_existence_cannot_select_a_trusted_refund() -> None:
+# Since D-054 an operator-named ticket that does not exist halts the run, so its
+# existence can only suppress the whole run (NI-3), never select what executes.
+def test_ticket_existence_can_only_suppress_a_run() -> None:
     base = _case_world(1, "in_transit")
     with_ticket = base.extend(tickets=(TicketRow(4001, OTHER_CUSTOMER, "hi", "anything"),))
     p = plan(
@@ -52,9 +54,13 @@ def test_ticket_existence_cannot_select_a_trusted_refund() -> None:
     )
     r1, _, _ = run_world(p, base)
     r2, p2, _ = run_world(p, with_ticket)
-    check_ni1(r1, r2)
-    assert r2.outcome != "executed" and effects(p2) == []
-    assert cell_origin("tickets", 4001, "@row") in r2.actions[0].pc.untrusted
+    p1 = run_world(p, base)[1]
+    assert r1.outcome == "halted" and r1.actions == () and effects(p1) == []
+    check_ni1(r1, r2)  # not applicable: r1 halted during resolution
+    check_ni3(r1, effects(p1), r2, effects(p2))
+    assert r2.outcome == "executed" and effects(p2) != []
+    # Within a run the operator-named row exists, so its read carries no existence origin.
+    assert cell_origin("tickets", 4001, "@row") not in r2.actions[0].pc.untrusted
 
 
 def test_case_ticket_existence_is_endorsable_by_the_rule() -> None:

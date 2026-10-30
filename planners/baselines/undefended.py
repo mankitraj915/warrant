@@ -15,7 +15,7 @@ from kernel.interpreter import Interpreter
 from kernel.labels import Label
 from kernel.plan_lang import PlanRejected, check_plan, parse_plan
 from kernel.run import OPERATOR, Planner, PlannerInput
-from kernel.tools.database import Database, lossless_text
+from kernel.tools.database import Database, ResolutionHalted, lossless_text
 from kernel.tools.registry import signatures
 from planners.baselines.delimited import DATA_INSTRUCTION, delimit
 
@@ -53,7 +53,10 @@ def run_undefended(
         check_plan(plan)
     except PlanRejected as exc:
         return "rejected", str(exc)
-    actions = Interpreter(Database(conn), extractor, OPERATOR).resolve(plan)
+    try:
+        actions = list(Interpreter(Database(conn), extractor, OPERATOR).resolve(plan))
+    except ResolutionHalted as exc:  # the same resolution as the kernel's (D-054)
+        return "halted", str(exc)
     for action in actions:
         args = action.canonical_args()
         if action.tool == "close_ticket":

@@ -17,6 +17,8 @@
   text, outside any ticket read, so label bugs cannot hide behind the ownership
   rule. Amounts and predicates inside the
   shapes are drawn from a type-directed expression generator.
+- ``sourced_plans(world)``: those shapes, or (a third of the time) a random
+  well-typed plan from the grammar-based generator (``planners.grammar_fuzz``).
 - ``raw_extractor``: every integer or TRUE/FALSE token, in order, with no
   dedupe and no cap, so extractor outputs are effectively arbitrary.
 """
@@ -30,6 +32,7 @@ from hypothesis import strategies as st
 
 from domain.seed import Customer, Incident, Order, Payment, Text, Ticket, World, generate
 from planners.builders import Json, call, expr, filter_, lit, map_, op, plan, ref
+from planners.grammar_fuzz import grammar_plan, pools
 
 CASE_CUSTOMER, OTHER_CUSTOMER, CASE_TICKET = 100, 101, 4000
 PROBE_TICKET = 4001  # a ticket id another customer may or may not have opened
@@ -511,11 +514,25 @@ def _refund_rec(ticket_id: int, rec: str, draw: Draw) -> Json:
     return _refund(lit(ticket_id), ref(rec, "id"), amount)
 
 
+# Where a plan comes from: the fixed laundering shapes or the grammar-based
+# generator (Phase 3, D-053). Patched by the per-generator mutant measurement.
+PLAN_SOURCES: tuple[str, ...] = ("shapes", "shapes", "grammar")
+
+
 @st.composite
-def plans(draw: Draw, world: World) -> Json:
-    """One to three laundering shapes in sequence."""
+def sourced_plans(draw: Draw, world: World) -> tuple[str, Json]:
+    """A plan and its source: one to three laundering shapes in sequence, or a
+    random well-typed plan from the grammar (``planners.grammar_fuzz``)."""
+    source = draw(st.sampled_from(PLAN_SOURCES))
+    if source == "grammar":
+        tickets = sorted({t.id for t in world.tickets} | {PROBE_TICKET, SECOND_TICKET})
+        return source, grammar_plan(draw, pools(_order_ids(world), tickets))
     names = _Names()
     steps: list[Json] = []
     for _ in range(draw(st.sampled_from([1, 1, 1, 2, 3]))):
         steps += _shape(draw, world, names)
-    return plan(*steps)
+    return source, plan(*steps)
+
+
+def plans(world: World) -> st.SearchStrategy[Json]:
+    return sourced_plans(world).map(lambda sourced: sourced[1])
