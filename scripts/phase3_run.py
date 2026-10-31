@@ -84,7 +84,7 @@ def steps(out: Path) -> list[tuple[str, list[str], dict[str, str], list[str]]]:
     for test, seed in STATS_SEEDS.items():
         name = test.rsplit("::", 1)[1]
         cmd = [PY, "-m", "pytest", test, "--hypothesis-show-statistics"]
-        cmd += [f"--hypothesis-seed={seed}", "-p", "no:cacheprovider", "-q"]
+        cmd += [f"--hypothesis-seed={seed}", "-p", "no:cacheprovider"]
         found.append((f"ni-stats-{name}", cmd, stats_env, []))
     for test, seed in CHUNK_SEEDS.items():
         name = test.rsplit("::", 1)[1]
@@ -129,7 +129,7 @@ def steps_b(out: Path) -> list[tuple[str, list[str], dict[str, str], list[str]]]
     ]
     for test, seed in STATS_SEEDS_B.items():
         cmd = [PY, "-m", "pytest", test, "--hypothesis-show-statistics"]
-        cmd += [f"--hypothesis-seed={seed}", "-p", "no:cacheprovider", "-q"]
+        cmd += [f"--hypothesis-seed={seed}", "-p", "no:cacheprovider"]
         found.append((f"ni-stats-{test.rsplit('::', 1)[1]}", cmd, stats_env, []))
     for test, seed in CHUNK_SEEDS_B.items():
         cmd = [PY, "scripts/fuzz_chunks.py", "--resume", "--chunks", "10", "--examples", "1000"]

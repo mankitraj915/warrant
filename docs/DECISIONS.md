@@ -1921,3 +1921,146 @@ Rejected: *one seed at 3,000 examples* (the 12 → 0 swing above); *the point es
 lower bound* (budgets too small exactly where rates are uncertain); *running the large budgets in
 `check`* (about 7 min today; budgets near ln(1000)/0.2% ≈ 3,500 examples per mutant would add
 tens of minutes).
+
+### Rates (owner run `--stage rates`, commit 92769f1, verified 2026-10-31)
+
+One step, exit 0, 3,041 s, tree clean afterwards, 819.8 MB available before it. All 160 rows in
+`results/phase3-rates/rates.jsonl` are at 92769f1. Each row is 1,000 examples at one seed
+(202616001–202616005). `examples` counts calls of the property, including the few that
+Hypothesis then discarded for size, so the rates are slightly low and the budgets
+correspondingly conservative.
+
+**Shapes** (every mutant must be caught; violations per seed, then pooled):
+
+| property | mutant | per seed | pooled | 95% low | latest first detection | budget |
+|---|---|---|---|---|---|---|
+| NI | at ignores index label | 26, 15, 11, 23, 3 | 78/5,158 | 1.21% | 815 | 1,500 |
+| NI | extraction ignores control | 4, 3, 7, 9, 6 | 29/5,158 | 0.39% | 917 | 3,000 |
+| NI | extractor output labelled trusted | 97, 91, 102, 93, 75 | 458/5,158 | 8.13% | 30 | 500 |
+| NI | filter ignores predicate labels | 5, 15, 10, 31, 15 | 76/5,158 | 1.18% | 359 | 1,000 |
+| NI | goodwill rule ignores amount | 2, 16, **0**, 36, **0** | 54/5,158 | 0.80% | 1,741* | 3,000 |
+| NI | goodwill rule ignores origin set | 5, 10, 6, 6, 12 | 39/5,158 | 0.55% | 850 | 2,500 |
+| NI | map body pc ignores list structure | 23, 28, 15, 36, 21 | 123/5,158 | 2.00% | 359 | 1,000 |
+| NI | ownership rule drops uniqueness | 56, 30, 36, 8, 42 | 172/5,158 | 2.88% | 141 | 500 |
+| NI | ownership rule ignores origin set | 8, 4, 21, 23, 20 | 76/5,158 | 1.18% | 430 | 1,500 |
+| NI | point read of a missing trusted ticket does not halt | 60, 68, 32, 70, 23 | 253/5,158 | 4.35% | 184 | 500 |
+| NI | policy ignores pc | 85, 46, 66, 96, 77 | 370/5,158 | 6.50% | 154 | 500 |
+| multirun | execution writes no record before the provider call | 5, 2, 8, 10, 2 | 27/5,624 | 0.33% | 923 | 3,500 |
+| multirun | goodwill rule drops the per-customer bound | 21, 22, 14, 22, 18 | 97/5,624 | 1.42% | 201 | 1,000 |
+| multirun | ownership rule drops never-refunded order | 10, 4, 7, 14, 9 | 44/5,624 | 0.58% | 513 | 2,000 |
+| multirun | ownership rule drops once-per-ticket across runs | 10, 1, 5, 15, **0** | 31/5,624 | 0.39% | 1,231* | 3,500 |
+| NI-5 | re-check treats a relaxed verdict as stricter | 9, 2, 2, **0**, **0** | 13/5,347 | 0.14% | 2,681* | 8,000 |
+
+\* from the zero-seed extensions below.
+
+**The pre-registered rule hit its guard on three mutants, and the guard's reading was wrong.**
+Under the D-056 rule, a seed at 0 meant "coverage gap: fix the shapes". Before changing any
+generator, each zero seed was run on to 4,000 examples (in session, one process at a time,
+`results/phase3b/zero_seed_extension.jsonl`; the tree then differed from 92769f1 only in the
+`-q` change to two runner scripts):
+
+| mutant | seed | first detection | violations |
+|---|---|---|---|
+| goodwill rule ignores amount | 202616003 | 1,596 | 20/4,102 |
+| goodwill rule ignores amount | 202616005 | 1,741 | 31/4,128 |
+| once-per-ticket across runs (multirun) | 202616005 | 1,231 | 21/4,533 |
+| NI-5 mutant | 202616004 | 2,681 | 12/4,258 |
+| NI-5 mutant | 202616005 | 1,263 | 13/4,261 |
+
+Every zero seed catches its mutant, later in the same run. So the shapes do reach all three;
+what varies by seed is *when* detection starts. The per-seed counts are over-dispersed for most
+mutants (for example 26, 15, 11, 23, 3), consistent with Hypothesis generating each example from
+earlier ones. Hence the second mistake in the pre-registered rule: `ln(1000)/p` assumes
+independent examples, and for goodwill-amount it would give 1,000 examples, yet two seeds had
+not caught it by 1,500.
+
+**Budget rule used (deviation from the pre-registered rule, recorded here):** for each mutant,
+`B = W + ln(1000)/p`, rounded up to a multiple of 500. `W` is the latest first detection over
+the five seeds, a warm-up; `p` is the Wilson 95% lower bound of the pooled rate. Each property
+takes the largest of its mutants' (computed in `results/phase3b/budgets.json`):
+
+| property | source | budget | set by |
+|---|---|---|---|
+| NI | shapes | 3,000 | extraction ignores control; goodwill amount |
+| multirun | shapes | 3,500 | no record before the provider call; once-per-ticket |
+| NI-5 | shapes | 8,000 | the NI-5 mutant |
+| NI | grammar | 4,000 | map body pc ignores list structure |
+| multirun, NI-5 | grammar | 3,000 | none: catches nothing alone (coverage rows only) |
+
+What this does and does not claim:
+- It is a model: a warm-up, then roughly independent detections at rate `p`. Under it, each
+  mutant's miss probability at its budget is under 0.1%.
+- It is not a measured 0.1% bound. Measuring one would take thousands of seeds per mutant. With
+  five seeds per mutant, every first detection is below its budget (0 of 5 seeds miss).
+- The owner-run stage b checks each budget at a sixth seed (`SEED` 20261031), not used to set it.
+
+Rejected:
+- *Fix the shapes for the three mutants:* they were not gaps, and tuning the shapes toward known
+  mutants weakens the evidence (owner, D-057).
+- *Many seeds × short runs per mutant:* the honest way to bound per-seed misses, but 0.1% needs
+  thousands of seeds.
+- *The point estimate:* too small exactly where rates are uncertain.
+
+### Grammar generator alone: coverage table (same run)
+
+| property | mutant | per seed | pooled | listed in `GRAMMAR_CATCHES` |
+|---|---|---|---|---|
+| NI | point read of a missing trusted ticket does not halt | 9, 24, 35, 13, 13 | 94/5,298 | yes |
+| NI | policy ignores pc | 6, 1, 16, 14, 22 | 59/5,298 | yes |
+| NI | extractor output labelled trusted | 5, 1, 2, 11, 11 | 30/5,298 | yes |
+| NI | map body pc ignores list structure | 5, 1, 2, 4, 7 | 19/5,298 | yes |
+| NI | filter ignores predicate labels | 0, 0, 1, 0, 0 | 1/5,298 | no (one seed) |
+| NI | at ignores index label | 0 at every seed | 0/5,298 | no |
+| NI | extraction ignores control | 0 at every seed | 0/5,298 | no |
+| NI | goodwill rule ignores amount; ignores origin set | 0 at every seed | 0/5,298 each | no |
+| NI | ownership rule drops uniqueness; ignores origin set | 0 at every seed | 0/5,298 each | no |
+| multirun | all four | 0 at every seed | 0/5,314 each | no |
+| NI-5 | re-check treats a relaxed verdict as stricter | 0 at every seed | 0/5,571 | no |
+
+Reading:
+- After the D-056 bias, the grammar generator catches the pure labelling mutants that need no
+  rule, as intended: `policy ignores pc`, `map body pc ignores list structure` and `extractor
+  output labelled trusted`. It also catches the existence mutant. At stage a it caught only the
+  existence mutant (8/3,126).
+- It reaches no declassification rule (ownership, goodwill), no multi-run state, and not NI-5
+  (approval requests). This was expected (D-053).
+- Two labelling mutants it misses or nearly misses: `at` index labels and filter predicate labels
+  (1 detection in 5,298). Reported, not tuned.
+
+### What `check` runs now
+
+`check` replays one measured detection per required mutant (`WITNESSES` in
+`tests/test_ni_mutants.py`): the rate run's settings (1,000 examples) at the seed with the
+earliest first detection. The run stops at the first violation, and shrinking is off (a catch
+needs no minimal example). The 21 tests (20 mutants plus a completeness check) take 23 s.
+- Generation is pinned, so this replays exactly. It is a regression check that the harness still
+  reaches each mutant, stated as such, not the detection claim.
+- The full budgets run in stage b (`mutant_rates.py verify`). Shrinking is off there too; it
+  changes no generated example.
+
+### pytest summary line in every log
+
+`fuzz_chunks.py` and the stage-a/b NI statistics steps passed `-q`, on top of `-q` in the
+`pyproject.toml` addopts. `-qq` suppresses pytest's summary line: the stage-a chunk rows have an
+empty `summary` field. The extra `-q` is removed, so each chunk row's `summary` and each step log
+end with the passed/failed counts. `check` used a single `-q` and already printed it (stage a:
+"239 passed").
+
+## D-057 Held-out mutants at Gate 3 (owner, 2026-10-31)
+
+The shape generator has been adjusted while known mutants were being measured (D-049 to D-056).
+So "every mutant is caught" is weaker evidence than it looks: the generator and the mutant list
+are no longer independent.
+
+At Gate 3, a separate reviewer subagent writes 3 to 5 new mutants. It sees only `docs/DESIGN.md`
+and `kernel/`: not `planners/`, not `tests/`, not the existing mutant list, not these results.
+- Each mutant is a small change to the kernel that the reviewer believes violates the invariant.
+- Each runs against the shapes and grammar properties at the set budgets and at `SEED`, from a
+  clean state.
+- The result is reported separately, as the held-out mutant result: caught or missed, with the
+  counterexample or the number of examples run.
+- **The generator is not changed before that report.** A miss is reported as a miss, then
+  analysed; any fix is a new decision with its own re-measurement.
+
+Rejected: *writing the held-out mutants myself* (I know the generator); *letting the reviewer
+see the existing mutants* (it would write variations of them).

@@ -86,14 +86,16 @@ mutant step failed, diagnosed in D-056: mutant results depended on Hypothesis's 
 constants pool (process state), not on the example database. Fixed by pinning generation
 (`tests/determinism.py`), explicit seeds, and NI properties split by plan source.
 
-Next, in order:
-1. Owner runs `phase3-run --stage rates` from a clean worktree at the committed head (command in
-   the latest gate/status message; D-056 "Budgets"). Not in session: the memory guard stopped it.
-2. Set `BUDGETS`, the check witnesses and `GRAMMAR_CATCHES` in `tests/test_ni_mutants.py` by the
-   D-056 rule; report rates, budgets and the grammar coverage table; run `check`.
-3. Owner runs `phase3-run --stage b`. Then verify, fill the RESULTS NI section, run the Gate 3
-   review (D-054 test table row by row, and every mutant claim in earlier gate reports: D-033,
-   D-049, D-050, D-054, Gate 1/2 reports), post the report, stop at Gate 3.
+Stage rates is verified and the budgets, `GRAMMAR_CATCHES` and the check witnesses are set
+(D-056 "Rates"; the budget rule deviates from the pre-registered one, recorded there).
 
-Until step 2, `BUDGETS` are placeholders and `check` has not been run on this code.
-Never run the fuzz or the owner-run stages inside a session. `check` takes about 7 min.
+Next, in order:
+1. Owner runs `phase3-run --stage b` from a clean worktree at the committed head (command in the
+   latest status message).
+2. Verify it; fill the RESULTS NI section.
+3. Gate 3: the independent review (D-054 test table row by row, and every mutant claim in
+   earlier gate reports: D-033, D-049, D-050, D-054, Gate 1/2 reports), plus the held-out
+   mutants (D-057: a reviewer that sees only DESIGN.md and kernel/ writes 3-5 mutants, run at
+   the set budgets, reported separately, no generator change first). Post the report, stop.
+
+Never run the fuzz or the owner-run stages inside a session. `check` takes about 1 min.
