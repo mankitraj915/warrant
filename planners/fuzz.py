@@ -17,8 +17,10 @@
   text, outside any ticket read, so label bugs cannot hide behind the ownership
   rule. Amounts and predicates inside the
   shapes are drawn from a type-directed expression generator.
-- ``sourced_plans(world)``: those shapes, or (a third of the time) a random
-  well-typed plan from the grammar-based generator (``planners.grammar_fuzz``).
+- ``plans(world, "grammar")``: random well-typed plans from the grammar-based
+  generator (``planners.grammar_fuzz``). Each NI property runs once per source,
+  with its own budget, so grammar plans never take examples from the shapes
+  (D-056).
 - ``raw_extractor``: every integer or TRUE/FALSE token, in order, with no
   dedupe and no cap, so extractor outputs are effectively arbitrary.
 """
@@ -257,8 +259,10 @@ def _shape(draw: Draw, world: World, n: _Names) -> list[Json]:
     if kind in ("credit", "close"):  # the Phase 2 consequential tools
         x = n("x")
         # Under a ticket read (possibly triggered by its text), or triggered by
-        # order-note text with no ticket read (map nesting is limited to 2).
-        trigger = draw(st.sampled_from(["none", "ticket", "note", "note"]))
+        # order-note text with no ticket read (map nesting is limited to 2). Since D-054 a
+        # plain read is trusted and never reaches the rules, so the ticket's own text is
+        # weighted up (D-056).
+        trigger = draw(st.sampled_from(["none", "ticket", "ticket", "ticket", "note", "note"]))
         in_read = trigger != "note"
         ticket_arg = t_arg if in_read else lit(t_id)
         if kind == "credit":
@@ -283,8 +287,12 @@ def _shape(draw: Draw, world: World, n: _Names) -> list[Json]:
                 st.sampled_from([lit("refunded"), lit("no_action"), lit("bogus"), *from_text])
             )
             action = call("close_ticket", ticket_id=ticket_arg, resolution=resolution)
-        if trigger == "ticket":  # triggered by the ticket's own text
-            return [read, expr(map_(ref(t), tk, extract, expr(map_(ref(oids), x, action))))]
+        if trigger == "ticket":  # triggered by the ticket's own text: per id, or at most once
+            # (once keeps a single credit per ticket, which is what reaches the goodwill
+            # rule's amount and reason checks since D-054 made plain-read credits trusted;
+            # D-056)
+            over = draw(st.sampled_from([ref(oids), op("at", ref(oids), lit(0))]))
+            return [read, expr(map_(ref(t), tk, extract, expr(map_(over, x, action))))]
         if trigger == "note":  # at most once: the first id in one order's note
             orders, first = n("orders"), n("first")
             note_ids = call("extract_order_ids", oids, text=ref(o, "customer_note"))
@@ -443,10 +451,14 @@ def _lit_extract(draw: Draw, n: _Names, t_id: int, c_id: int) -> list[Json]:
     whose body extracts (Gate 2 review #1, #2). With ``counting_extractor`` the
     literal's result also depends on that count."""
     ids, x, amt = n("ids"), n("x"), n("amt")
-    text = lit(draw(st.sampled_from(["noop", "please refund #7000", "#7001", "#7000 #7001"])))
     prelude: list[Json] = []
     control = draw(st.sampled_from(["none", "note", "note", "exists"]))
     own_text = draw(st.booleans())
+    # A prelude that extracts from a literal leaks only through the call count, which the
+    # counting extractor shows only on token-free text (D-056); its own text leaks through
+    # its label, whatever the later literal says.
+    texts = ["noop", "please refund #7000", "#7001", "#7000 #7001"] if own_text else ["noop"]
+    text = lit(draw(st.sampled_from(texts)))
     if control == "note":
         orders, sel, f, s = n("orders"), n("sel"), n("f"), n("s")
         junk = ref(s, "customer_note") if own_text else lit("noop")
@@ -514,25 +526,21 @@ def _refund_rec(ticket_id: int, rec: str, draw: Draw) -> Json:
     return _refund(lit(ticket_id), ref(rec, "id"), amount)
 
 
-# Where a plan comes from: the fixed laundering shapes or the grammar-based
-# generator (Phase 3, D-053). Patched by the per-generator mutant measurement.
-PLAN_SOURCES: tuple[str, ...] = ("shapes", "shapes", "grammar")
+SOURCES = ("shapes", "grammar")
 
 
 @st.composite
-def sourced_plans(draw: Draw, world: World) -> tuple[str, Json]:
-    """A plan and its source: one to three laundering shapes in sequence, or a
-    random well-typed plan from the grammar (``planners.grammar_fuzz``)."""
-    source = draw(st.sampled_from(PLAN_SOURCES))
+def plans(draw: Draw, world: World, source: str = "shapes") -> Json:
+    """One to three laundering shapes in sequence, or (``source="grammar"``) a random
+    well-typed plan from the grammar (``planners.grammar_fuzz``)."""
     if source == "grammar":
         tickets = sorted({t.id for t in world.tickets} | {PROBE_TICKET, SECOND_TICKET})
-        return source, grammar_plan(draw, pools(_order_ids(world), tickets))
+        case_orders = [o.id for o in world.orders if o.customer_id == CASE_CUSTOMER]
+        case = (CASE_TICKET, CASE_CUSTOMER, case_orders)
+        return grammar_plan(draw, pools(_order_ids(world), tickets, case))
+    assert source == "shapes", source
     names = _Names()
     steps: list[Json] = []
     for _ in range(draw(st.sampled_from([1, 1, 1, 2, 3]))):
         steps += _shape(draw, world, names)
-    return source, plan(*steps)
-
-
-def plans(world: World) -> st.SearchStrategy[Json]:
-    return sourced_plans(world).map(lambda sourced: sourced[1])
+    return plan(*steps)

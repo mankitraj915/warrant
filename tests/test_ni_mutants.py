@@ -3,6 +3,12 @@
 Each mutant disables one mechanism the design relies on. The NI property is
 then run with a fixed seed and must fail. Written before the kernel; the
 patched names are the kernel's extension points for exactly this test.
+
+A mutant counts as caught only from a clean state (D-056): an explicit seed, no
+example database, and generation pinned to the seed (``tests/determinism.py``),
+so the result does not depend on what else the process ran. Every mutant runs
+against the shapes properties; the grammar properties run the mutants the
+grammar generator catches on its own (D-056 coverage table).
 """
 
 from collections.abc import Callable
@@ -10,7 +16,7 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, given, seed, settings
 from hypothesis import strategies as st
 
 import kernel.declassify
@@ -66,9 +72,6 @@ def _never(self: Any, *args: Any) -> bool:
     return False
 
 
-# Examples per mutant. The rarest fires about once per 310 examples (measured
-# 2026-10-30, D-049), so 600 left too little margin; a caught mutant stops early.
-NI_BUDGET = 3000
 MUTANTS: dict[str, tuple[Any, str, Any]] = {
     "filter ignores predicate labels": (
         kernel.interpreter,
@@ -111,9 +114,6 @@ MUTANTS: dict[str, tuple[Any, str, Any]] = {
     # Gate 2 review findings 1-2: extraction under untrusted control.
     "extraction ignores control": (kernel.interpreter, "EXTRACTION_FOLLOWS_CONTROL", False),
 }
-# The rarest multirun mutant fires about once per 330 examples (measured 2026-10-30,
-# D-049); at 600 examples one was missed by chance.
-MULTIRUN_BUDGET = 3000
 MULTIRUN_MUTANTS: dict[str, tuple[Any, str, Any]] = {
     "ownership rule drops once-per-ticket across runs": (
         TrustedReader,
@@ -130,42 +130,9 @@ MULTIRUN_MUTANTS: dict[str, tuple[Any, str, Any]] = {
 }
 
 
-def _run_property(max_examples: int, prop_fn: Any = ni_property) -> Callable[[], None]:
-    @settings(
-        max_examples=max_examples,
-        derandomize=True,
-        database=None,
-        report_multiple_bugs=False,
-        suppress_health_check=list(HealthCheck),
-    )
-    @given(st.data())
-    def prop(data: Any) -> None:
-        prop_fn(data)
-
-    return prop
-
-
-@pytest.mark.parametrize("name", sorted(MUTANTS))
-def test_ni_harness_catches_mutant(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    module, attribute, replacement = MUTANTS[name]
-    monkeypatch.setattr(module, attribute, replacement)
-    with pytest.raises(NIViolation):
-        _run_property(NI_BUDGET)()
-
-
-@pytest.mark.parametrize("name", sorted(MULTIRUN_MUTANTS))
-def test_multirun_harness_catches_mutant(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    module, attribute, replacement = MULTIRUN_MUTANTS[name]
-    monkeypatch.setattr(module, attribute, replacement)
-    with pytest.raises(NIViolation):
-        _run_property(MULTIRUN_BUDGET, multirun_property)()
-
-
 # Gate 2 review finding 4: an approved set must not stop because its own effects
 # relaxed a later verdict (NEEDS_APPROVAL -> ALLOW). Reversing the order makes
 # relaxation count as stricter, which is the behaviour the reviewer found.
-# About 1 detection in 180 examples (D-049); NI-5 runs are cheap.
-NI5_BUDGET = 2000
 NI5_MUTANTS: dict[str, tuple[Any, str, Any]] = {
     "re-check treats a relaxed verdict as stricter": (
         kernel.execution,
@@ -175,9 +142,59 @@ NI5_MUTANTS: dict[str, tuple[Any, str, Any]] = {
 }
 
 
-@pytest.mark.parametrize("name", sorted(NI5_MUTANTS))
-def test_ni5_harness_catches_mutant(name: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    module, attribute, replacement = NI5_MUTANTS[name]
+PROPERTIES: dict[str, tuple[dict[str, tuple[Any, str, Any]], Any]] = {
+    "NI": (MUTANTS, ni_property),
+    "multirun": (MULTIRUN_MUTANTS, multirun_property),
+    "NI-5": (NI5_MUTANTS, ni5_property),
+}
+SEED = 20261031  # the mutant tests' seed; rates were measured with other seeds (D-056)
+# Examples per (property, plan source): at least ln(1000)/p for the rarest mutant's
+# measured clean-state detection rate p, so each miss has probability under 0.1% (D-056).
+BUDGETS: dict[tuple[str, str], int] = {
+    ("NI", "shapes"): 3000,
+    ("multirun", "shapes"): 3000,
+    ("NI-5", "shapes"): 2000,
+    ("NI", "grammar"): 3000,
+    ("multirun", "grammar"): 3000,
+    ("NI-5", "grammar"): 2000,
+}
+# Mutants the grammar generator catches on its own (D-056 coverage table).
+GRAMMAR_CATCHES: dict[str, tuple[str, ...]] = {"NI": (), "multirun": (), "NI-5": ()}
+
+
+def _run_property(
+    max_examples: int, prop_fn: Any = ni_property, source: str = "shapes", seed_: int = SEED
+) -> Callable[[], None]:
+    @seed(seed_)
+    @settings(
+        max_examples=max_examples,
+        derandomize=False,
+        database=None,
+        deadline=None,
+        report_multiple_bugs=False,
+        suppress_health_check=list(HealthCheck),
+    )
+    @given(st.data())
+    def prop(data: Any) -> None:
+        prop_fn(data, source)
+
+    return prop
+
+
+def _cases() -> list[tuple[str, str, str]]:
+    cases = [
+        (prop, "shapes", name) for prop, (mutants, _) in PROPERTIES.items() for name in mutants
+    ]
+    cases += [(prop, "grammar", name) for prop, names in GRAMMAR_CATCHES.items() for name in names]
+    return sorted(cases)
+
+
+@pytest.mark.parametrize(("prop", "source", "name"), _cases(), ids=" / ".join)
+def test_harness_catches_mutant(
+    prop: str, source: str, name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mutants, prop_fn = PROPERTIES[prop]
+    module, attribute, replacement = mutants[name]
     monkeypatch.setattr(module, attribute, replacement)
     with pytest.raises(NIViolation):
-        _run_property(NI5_BUDGET, ni5_property)()
+        _run_property(BUDGETS[prop, source], prop_fn, source)()

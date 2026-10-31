@@ -7,6 +7,11 @@ Hypothesis runs derandomized under the default ``check`` profile so
 ``scripts/tasks.py check`` is reproducible. ``HYPOTHESIS_PROFILE=fuzz`` (the
 ``fuzz`` target) runs long and randomized; ``WARRANT_FUZZ_EXAMPLES`` sets its
 example count (default 20,000) so ``scripts/fuzz_chunks.py`` can run bounded chunks.
+
+Neither profile uses an example database, so no run replays examples saved by an
+earlier one, and generation is pinned to the seed alone (``tests/determinism.py``,
+D-056): Hypothesis's pool of literals harvested from loaded modules is replaced by a
+fixed empty one before any test runs.
 """
 
 import os
@@ -16,6 +21,9 @@ from pathlib import Path
 from hypothesis import settings
 
 from evals.netguard import NetworkAccessError, block_network
+from tests.determinism import pin_generation
+
+pin_generation()
 
 __all__ = ["NetworkAccessError"]
 
@@ -66,12 +74,13 @@ def pytest_unconfigure() -> None:
 
 
 settings.register_profile(
-    "check", max_examples=200, derandomize=True, deadline=None, print_blob=True
+    "check", max_examples=200, derandomize=True, deadline=None, print_blob=True, database=None
 )
 settings.register_profile(
     "fuzz",
     max_examples=int(os.environ.get("WARRANT_FUZZ_EXAMPLES", "20000")),
     deadline=None,
     print_blob=True,
+    database=None,
 )
 settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "check"))

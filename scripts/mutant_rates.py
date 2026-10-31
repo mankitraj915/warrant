@@ -1,86 +1,70 @@
-"""Per-mutant detection measurement for the NI harness (D-049, D-053).
+"""Per-mutant detection measurement for the NI harness (D-049, D-053, D-056).
 
-For every mutant in ``tests/test_ni_mutants.py`` and each plan generator:
+Every measurement runs in its own process from a clean state: an explicit seed,
+no example database, and generation pinned to the seed (``tests/determinism.py``).
+So a result does not depend on what else ran, and each process's memory is bounded.
 
-- ``mixed``: the fuzzer as configured (``planners.fuzz.PLAN_SOURCES``: shapes and
-  grammar), multirun plans as in ``test_noninterference``;
-- ``grammar``: every plan from the grammar generator alone, and both multirun plans
-  random (so from the grammar too),
+Modes:
 
-it runs two derandomized measurements at the mutant's budget (3,000 single-run,
-3,000 multirun, 2,000 NI-5):
+- ``rates``: for every mutant, property (NI, multirun, NI-5) and plan source
+  (shapes, grammar), run ``--examples`` examples to the end with each ``--seed``
+  (repeatable) and count the examples with an ``NIViolation``. Examples within one
+  seed are not independent (Hypothesis explores around earlier examples), so
+  rates come from several seeds. These rates set the budgets in
+  ``tests/test_ni_mutants.py`` (rule in DECISIONS D-056).
+- ``verify``: for every mutant, property and source, run the mutant test as
+  ``check`` runs it (its seed ``SEED``, its budget ``BUDGETS``) and record caught
+  or missed, plus a count run over the same examples. A shapes miss, or a miss
+  of a mutant listed in ``GRAMMAR_CATCHES``, makes the exit code 1; other grammar
+  rows are the coverage table.
 
-- ``count``: every example runs to the end; the number of examples with an
-  ``NIViolation`` and the first such example;
-- ``catch``: the property as the mutant test runs it (stops at the first
-  violation): caught or missed.
+``--rule gate2`` runs with the Phase 1-2 existence rule (taint kept, no halt), to
+attribute a rate change to D-054. One JSON line per measurement goes to
+``--out``; ``--resume`` skips measurements already in it.
 
-Derandomized seeds come from the wrapped function, so the example sequences differ
-from ``check``'s. One JSON line per (generator, mutant, measurement) goes to ``--out``.
-
-Usage: ``python scripts/mutant_rates.py --out results/mutant_rates.jsonl
-[--generator mixed|grammar] [--property NI|multirun|NI-5]``.
+Usage: ``python scripts/mutant_rates.py rates --examples 3000 --seed 7 --out FILE``
+or ``python scripts/mutant_rates.py verify --out FILE``.
 """
 
 import argparse
 import json
+import math
 import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 
-from hypothesis import HealthCheck, given, settings
-from hypothesis import strategies as st
+from tests.determinism import pin_generation  # noqa: E402
 
-import planners.fuzz
-import tests.test_noninterference as tn
-from tests.ni_properties import NIViolation
-from tests.test_approval_binding import ni5_property
-from tests.test_ni_mutants import (
-    MULTIRUN_BUDGET,
-    MULTIRUN_MUTANTS,
-    MUTANTS,
-    NI5_BUDGET,
-    NI5_MUTANTS,
-    NI_BUDGET,
+pin_generation()
+
+from hypothesis import HealthCheck, given, seed, settings  # noqa: E402
+from hypothesis import strategies as st  # noqa: E402
+
+import kernel.tools.database  # noqa: E402
+from tests.ni_properties import NIViolation  # noqa: E402
+from tests.test_ni_mutants import (  # noqa: E402
+    BUDGETS,
+    GRAMMAR_CATCHES,
+    PROPERTIES,
+    SEED,
     _run_property,
 )
 
-# Outside pytest, tests/conftest.py's profiles are not loaded: no deadline, as there.
-settings.register_profile("mutant_rates", deadline=None)
-settings.load_profile("mutant_rates")
-
-GROUPS = [
-    ("NI", MUTANTS, NI_BUDGET, "ni_property"),
-    ("multirun", MULTIRUN_MUTANTS, MULTIRUN_BUDGET, "multirun_property"),
-    ("NI-5", NI5_MUTANTS, NI5_BUDGET, "ni5_property"),
-]
+SOURCES = ("shapes", "grammar")
 
 
-def _grammar_run_plan(data: Any, world: Any, tickets: Any, first: bool, credit: bool) -> Any:
-    source, plan = data.draw(planners.fuzz.sourced_plans(world), label="plan")
-    return source, plan
+def count(prop_fn: Any, source: str, examples: int, seed_: int) -> dict[str, Any]:
+    stats: dict[str, Any] = {"examples": 0, "violations": 0, "first_violation": None}
 
-
-def set_generator(name: str) -> None:
-    if name == "grammar":
-        planners.fuzz.PLAN_SOURCES = ("grammar",)
-        tn._run_plan = _grammar_run_plan
-
-
-def prop_fn(name: str) -> Any:
-    return ni5_property if name == "ni5_property" else getattr(tn, name)
-
-
-def count(budget: int, prop: Any) -> dict[str, Any]:
-    stats = {"examples": 0, "violations": 0, "first_violation": None}
-
+    @seed(seed_)
     @settings(
-        max_examples=budget,
-        derandomize=True,
+        max_examples=examples,
+        derandomize=False,
         database=None,
         deadline=None,
         suppress_health_check=list(HealthCheck),
@@ -89,7 +73,7 @@ def count(budget: int, prop: Any) -> dict[str, Any]:
     def counted(data: Any) -> None:
         stats["examples"] += 1
         try:
-            prop(data)
+            prop_fn(data, source)
         except NIViolation:
             stats["violations"] += 1
             if stats["first_violation"] is None:
@@ -99,67 +83,130 @@ def count(budget: int, prop: Any) -> dict[str, Any]:
     return stats
 
 
-def catch(budget: int, prop: Any) -> dict[str, Any]:
+def catch(prop_fn: Any, source: str, examples: int, seed_: int) -> dict[str, Any]:
     try:
-        _run_property(budget, prop)()
+        _run_property(examples, prop_fn, source, seed_)()
     except NIViolation:
         return {"caught": True}
     return {"caught": False}
 
 
+def one(spec: dict[str, Any]) -> dict[str, Any]:
+    """One measurement, in this (fresh) process."""
+    assert spec["rule"] in ("current", "gate2")
+    if spec["rule"] == "gate2":
+        kernel.tools.database.POINT_READ_EXISTENCE = True
+        kernel.tools.database.HALT_ON_ABSENT_TRUSTED_TICKET = False
+    mutants, prop_fn = PROPERTIES[spec["property"]]
+    module, attribute, value = mutants[spec["mutant"]]
+    setattr(module, attribute, value)
+    start = time.monotonic()
+    measure = count if spec["measurement"] == "count" else catch
+    result = measure(prop_fn, spec["source"], spec["examples"], spec["seed"])
+    return {**spec, **result, "seconds": round(time.monotonic() - start, 1)}
+
+
 def git_commit() -> str:
     def git(*args: str) -> str:
-        return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
+        out = subprocess.run(["git", *args], capture_output=True, text=True, cwd=ROOT)
+        return out.stdout.strip()
 
     return git("rev-parse", "HEAD") + ("-dirty" if git("status", "--porcelain") else "")
 
 
+def key(spec: dict[str, Any]) -> tuple[Any, ...]:
+    return tuple(
+        spec[k] for k in ("measurement", "property", "source", "mutant", "examples", "seed", "rule")
+    )
+
+
+def specs(args: argparse.Namespace) -> list[dict[str, Any]]:
+    out = []
+    for prop, (mutants, _) in PROPERTIES.items():
+        if args.property and prop not in args.property:
+            continue
+        for source in args.source or SOURCES:
+            for name in sorted(mutants):
+                if args.mutant and name not in args.mutant:
+                    continue
+                base = {"property": prop, "source": source, "mutant": name, "rule": args.rule}
+                if args.mode == "rates":
+                    for seed_ in args.seed or [20261101]:
+                        out.append(
+                            {
+                                **base,
+                                "measurement": "count",
+                                "examples": args.examples,
+                                "seed": seed_,
+                            }
+                        )
+                else:
+                    budget = BUDGETS[prop, source]
+                    for m in ("catch", "count"):
+                        out.append({**base, "measurement": m, "examples": budget, "seed": SEED})
+    return out
+
+
+def required(row: dict[str, Any]) -> bool:
+    """A verify row that must be caught: every shapes row, and the grammar's listed ones."""
+    return row["source"] == "shapes" or row["mutant"] in GRAMMAR_CATCHES[row["property"]]
+
+
+def wilson_low(k: int, n: int, z: float = 1.96) -> float:
+    if n == 0:
+        return 0.0
+    p = k / n
+    centre = p + z * z / (2 * n)
+    spread = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
+    return max(0.0, (centre - spread) / (1 + z * z / n))
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--generator", choices=["mixed", "grammar"], action="append")
-    parser.add_argument("--property", choices=[g[0] for g in GROUPS], action="append")
+    parser.add_argument("mode", choices=["rates", "verify", "one"])
+    parser.add_argument("--out", type=Path)
+    parser.add_argument("--examples", type=int, default=3000)
+    parser.add_argument("--seed", type=int, action="append")
+    parser.add_argument("--rule", choices=["current", "gate2"], default="current")
+    parser.add_argument("--property", action="append")
+    parser.add_argument("--source", action="append", choices=SOURCES)
+    parser.add_argument("--mutant", action="append")
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--spec")
     args = parser.parse_args(argv)
-    generators = args.generator or ["mixed", "grammar"]
-    if len(generators) > 1:  # the grammar patch is process-wide: one process per generator
-        code = 0
-        for g in generators:
-            extra = [a for p in args.property or [] for a in ("--property", p)]
-            cmd = [sys.executable, __file__, "--out", str(args.out), "--generator", g, *extra]
-            code |= subprocess.call(cmd)
-        return code
-    generator = generators[0]
-    set_generator(generator)
-    commit = git_commit()
+    if args.mode == "one":
+        print(json.dumps(one(json.loads(args.spec))), flush=True)
+        return 0
+    assert args.out is not None, "--out is required"
     args.out.parent.mkdir(parents=True, exist_ok=True)
+    done: set[tuple[Any, ...]] = set()
+    if args.resume and args.out.exists():
+        lines = args.out.read_text(encoding="utf-8").splitlines()
+        done = {key(json.loads(line)) for line in lines if line}
+    commit = git_commit()
     missed = 0
-    for group, mutants, budget, prop_name in GROUPS:
-        if args.property and group not in args.property:
+    for spec in specs(args):
+        if key(spec) in done:
             continue
-        prop = prop_fn(prop_name)
-        for name, (module, attribute, value) in sorted(mutants.items()):
-            for measurement in ("count", "catch"):
-                old = getattr(module, attribute)
-                setattr(module, attribute, value)
-                start = time.monotonic()
-                try:
-                    result = (count if measurement == "count" else catch)(budget, prop)
-                finally:
-                    setattr(module, attribute, old)
-                row = {
-                    "generator": generator,
-                    "property": group,
-                    "mutant": name,
-                    "measurement": measurement,
-                    "budget": budget,
-                    **result,
-                    "seconds": round(time.monotonic() - start, 1),
-                    "commit": commit,
-                }
-                missed += measurement == "catch" and not result["caught"]
-                with args.out.open("a", encoding="utf-8") as f:
-                    f.write(json.dumps(row) + "\n")
-                print(json.dumps(row), flush=True)
+        cmd = [sys.executable, __file__, "one", "--spec", json.dumps(spec)]
+        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
+        if proc.returncode != 0:
+            print(proc.stdout + proc.stderr, flush=True)
+            return proc.returncode
+        row = json.loads(proc.stdout.strip().splitlines()[-1])
+        row["commit"] = commit
+        if row["measurement"] == "count":
+            row["rate"] = row["violations"] / max(row["examples"], 1)
+            row["rate_wilson95_low"] = wilson_low(row["violations"], row["examples"])
+        missed += (
+            args.mode == "verify"
+            and row["measurement"] == "catch"
+            and not row["caught"]
+            and required(row)
+        )
+        with args.out.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row) + "\n")
+        print(json.dumps(row), flush=True)
     return 1 if missed else 0
 
 

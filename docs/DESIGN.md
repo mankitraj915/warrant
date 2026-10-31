@@ -659,16 +659,21 @@ exception in either run fails the test.
 
 ### 9.4 Harness
 
-- Plans come from two generators (`planners.fuzz.sourced_plans`): two thirds from
-  hand-written shapes (Gate 2 review #3), one third from a grammar-based generator
-  (`planners.grammar_fuzz`, Phase 3, D-053).
+- Plans come from two generators (`planners.fuzz.plans(world, source)`): hand-written shapes
+  (Gate 2 review #3) and a grammar-based generator (`planners.grammar_fuzz`, Phase 3, D-053).
+  Each NI property (single-run, multi-run, NI-5) runs once per generator, as separate tests
+  with separate budgets, so grammar plans never take examples from the shapes (D-056).
   - **Shapes.** Amounts and predicates inside them come from a small type-directed expression
     generator.
   - **Grammar plans.** These are arbitrary well-typed plans derived from the plan grammar and
     the tool registry. Every expression is generated for an expected type from the names and
     record fields in scope, per-type literal pools (the world's ids plus ids that name
     nothing) and operators. `map`/`filter` nest up to `MAX_DEPTH`, plans have at most 40 steps,
-    and expressions are at most 2 operators deep.
+    and expressions are at most 2 operators deep. It is biased towards untrusted data in
+    control (D-056): half the plans open by extracting order ids from a record's text, and
+    iteration, `at`, `len` and `contains` prefer data derived from untrusted text, with mostly
+    consequential calls under it. It targets the labelling rules, not the declassification
+    rules.
   - Every generated plan passes the checker.
   - Hypothesis's statistics output counts each plan's source and, for grammar plans, each
     construct used (every tool, operator, iteration depth, field path, consequential call under
@@ -696,10 +701,15 @@ exception in either run fails the test.
 - Mutant tests break one mechanism each (four label rules, the pc component, rule uniqueness,
   the rule's origin set, once-per-ticket, never-refunded, record-before-call, the halt on a
   missing trusted ticket (D-054), the goodwill rule's origins, amount and per-customer bound, extraction under control,
-  and the execution re-check's direction) and require the harness to fail. The execution
+  and the execution re-check's direction) and require the harness to fail. Every mutant runs
+  against the shapes properties, and the grammar properties run the mutants the grammar catches
+  on its own. A mutant counts as caught only from a clean state: an explicit seed, no example
+  database, and Hypothesis's generation pinned to the seed (`tests/determinism.py`, D-056). The
+  execution
   pre-pass has no mutant: the harness has no concurrent writer, so it is covered by regression
   tests only.
-- `tasks.py check` runs a derandomized profile; `tasks.py fuzz` runs the `fuzz` profile. Shrunk
+- `tasks.py check` runs a derandomized profile; `tasks.py fuzz` runs the `fuzz` profile. Neither
+  uses an example database. Shrunk
   counterexamples become `@example` regression tests.
 
 ---

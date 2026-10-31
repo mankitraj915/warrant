@@ -1221,6 +1221,22 @@ The fuzz evidence at 50415cb is therefore that chunk, `tasks.py check` (derandom
 examples per property, plus the mutants at 3,000/3,000/2,000) and the 2,000-example statistics
 run above.
 
+**Owner-run chunked fuzz: passed (recorded 2026-10-31).** The owner ran the command in "Gate 2
+outcome" with Claude Code closed. I checked `results/fuzz_chunks.jsonl`, keeping rows whose
+seeds fall in the three ranges:
+
+| property | chunks (seeds) | passing | failing | invalid | time | peak RSS | available memory |
+|---|---|---|---|---|---|---|---|
+| single-run NI | 20 (202610800–819) | 20,000 | 0 | 580 (2.8%) | 335 s | 95.2 MB | 765–1,040 MB |
+| multirun | 20 (202610900–919) | 20,000 | 0 | 2,425 (10.8%) | 279 s | 94.2 MB | 498–946 MB |
+| NI-5 | 20 (202611000–019) | 20,000 | 0 | 1,492 (6.9%) | 205 s | 82.4 MB | 432–802 MB |
+
+All 60 seeds are present once, every exit code is 0, and 59 rows record commit 0905584. Chunk
+202610800 is the D-050 run at 50415cb, which predates the commit column; its kernel, planners
+and tests are identical. These runs were random, not derandomized, so the D-056 issue
+(Hypothesis's harvested-constants pool) changes which examples were drawn but not the validity of
+a pass.
+
 ## Gate 2 outcome (owner, 2026-10-30)
 
 1. **Post-fix fuzz:** not run inside a Claude Code session, whose memory guard stopped it
@@ -1470,8 +1486,9 @@ grammar plans rarely reach the declassification rules: they widen label-propagat
 while the rule mechanisms are still exercised mainly by the shapes. The per-mutant measurement
 says whether the grammar alone is enough.
 
-**Whether the grammar generator alone catches every mutant at its budget:** measured in the
-owner-run Phase 3 run (`scripts/mutant_rates.py`, below). Pending.
+**Whether the grammar generator alone catches every mutant at its budget:** no. In stage a it
+caught 1 of 16 mutants. It was then biased towards untrusted data in control, and its plans run as
+separate properties. Coverage table in D-056.
 
 **Rejected:**
 - *Replace the shapes with the grammar:* the shapes target known laundering mechanisms (D-049)
@@ -1518,8 +1535,13 @@ the final generator.
 
 **Benefit: approval burden.** I measured this in-session on the uncommitted tree. On dev, the
 benign `warrant+oracle` tasks that asked for approval were T12, T34 and T37, so 3/40 (5/40
-before; T08 and T20 no longer ask). The goodwill rule is now consulted only for credits the
+before: T12, T20, T26, T34, T37, D-042). The goodwill rule is now consulted only for credits the
 ticket text triggers. The Phase 3 run re-measures this at the committed code.
+
+*Correction (2026-10-31):* this entry first said "T08 and T20 no longer ask". T08 was never in
+the D-042 burden. The two that stopped asking are T20 (two eligible orders, reached through the
+ticket read) and T26 (a non-standard goodwill amount, credited to the ticket's customer through
+the read). Both reads are now trusted. Confirmed at 6e27f60 by the owner-run evaluation.
 
 **Tests changed for the variant.** I reported "11 tests" earlier: that was the number of tests
 failing on the first `check` after adopting the variant. The table lists every test whose
@@ -1558,9 +1580,17 @@ they were):
   830.6, 921.7, 876.1 and 984.4 MB;
 - `FreePhysicalMemory` that evening: 884 MB.
 
-**With Claude Code closed:** taken from the `available_mb_before` column of the owner's runs, the
-Gate 2 fuzz (`results/fuzz_chunks.jsonl`) and every step of the Phase 3 run (`steps.jsonl`).
-Recorded when the owner returns.
+**With Claude Code closed** (owner's runs, 2026-10-30/31, `available_mb_before`):
+- before each step of the Phase 3 run (`results/phase3/steps.jsonl`): 366 to 1,029 MB;
+- before each Gate 2 fuzz chunk (`results/fuzz_chunks.jsonl`, 59 rows at 0905584): 432 to
+  1,040 MB;
+- before each Phase 3 fuzz chunk (`results/phase3/fuzz_chunks_phase3.jsonl`): 296 to 769 MB.
+
+So free memory with Claude Code closed ranged from about 365 to 1,040 MB between steps, and fell
+to 296 MB between chunks, with the owner's other projects running. Closing Claude Code did not
+reliably free more memory than having it open (830–985 MB above): other processes dominate. For
+Phase 4, plan on about 300 MB of headroom at worst, not 1 GB. A quantized model whose resident
+size approaches that will contend with the rest of the machine.
 
 **Plan.** `eval-llm` runs the same way as the fuzz and the Phase 3 run: one command, run by the
 owner with Claude Code closed, from a clean worktree at a fixed commit. It refuses a dirty tree,
@@ -1624,3 +1654,270 @@ measurements:
 - NI statistics: about 2 min.
 - Chunked fuzz: 15–20 min (60 chunks at 10–16 s plus process start-up).
 - Evaluations and sweeps: about 2–3 min (6–22 s each with fewer configurations at D-050).
+
+## Phase 3 owner run: stage a results (commit 6e27f60, verified 2026-10-31)
+
+The owner ran the command above after the Gate 2 fuzz, with Claude Code closed. Twelve steps ran
+and 11 passed. Every row of `results/phase3/steps.jsonl` records commit 6e27f60 and a clean tree
+before and after. Total 3,603 s (estimate: 1–1.5 h).
+
+| step | exit | time | result (read from its log or output file) |
+|---|---|---|---|
+| `check` | 0 | 291 s | ruff, format, mypy clean; 239 passed. The first full `check` on the Phase 3 code. |
+| `mutant-rates` | **1** | 2,362 s | combined generator missed "extraction ignores control" in the catch run; the grammar generator alone caught 1 of 16 mutants. Diagnosed in D-056. |
+| NI statistics, single-run | 0 | 35 s | 2,000 passing, 0 failing, 54 invalid |
+| NI statistics, multirun | 0 | 25 s | 2,000 passing, 0 failing, 199 invalid |
+| NI statistics, NI-5 | 0 | 19 s | 2,000 passing, 0 failing, 175 invalid |
+| fuzz chunks, single-run | 0 | 324 s | 20 × 1,000 (seeds 202612800–819), 0 failing, 678 invalid |
+| fuzz chunks, multirun | 0 | 272 s | 20 × 1,000 (202612900–919), 0 failing, 2,407 invalid |
+| fuzz chunks, NI-5 | 0 | 205 s | 20 × 1,000 (202613000–019), 0 failing, 1,398 invalid |
+| `eval` dev | 0 | 8 s | 3,632 rows; canary leaks 0 |
+| `eval` holdout | 0 | 8 s | 4,224 rows; canary leaks 0 |
+| `sweep` dev | 0 | 25 s | 7 caps × 4 configurations |
+| `sweep` holdout | 0 | 30 s | 7 caps × 4 configurations |
+
+**Evaluation checks.**
+- `delimited+gullible` equals `undefended+gullible`, and `delimited+attacker` equals
+  `undefended+attacker`, on every pair of both suites. Each pair compares outcome, attack
+  verdict, refunds, credits and closures.
+- `warrant+gullible` equals `warrant+oracle` in every metric, as isolation predicts.
+- Benign approval burden is 3/40 (T12, T34, T37) in both suites. T20 and T26 execute without
+  approval and pass utility.
+- The tables are in `docs/RESULTS.md`.
+
+**Halts and NI-checked shares** (stage-a statistics, mixed generator, single-run property; the
+percentages are Hypothesis's, over all 2,054 cases):
+
+| | shapes | grammar | Gate 2 (D-050, shapes only, no halts) |
+|---|---|---|---|
+| pairs with at least one halted run | 16.8 of 62.8 points (27%) | 6.1 of 37.0 (16%) | 0% |
+| pairs with no halt, so NI-1 checked | 44.6 of 62.8 (71%) | 29.9 of 37.0 (81%) | 100% |
+| NI-3 constrained effects (rule consulted, projections equal) | 16.0 of 62.8 (25%) | 0 | 46.0 of 100 (46%) |
+
+**This is a sharp drop.** The share of pairs in which NI-3 actually constrained effects fell
+from 46% to 25% for the shapes. D-054 is the reason:
+- reads of operator-named tickets are trusted, so fewer runs consult a rule at all;
+- 27% of shape pairs now have a halted run.
+
+NI-1 still checks the non-halted 71%, and NI-2 and NI-4 check every run. The stage-b statistics,
+on the split properties, re-measure this.
+
+## D-056 Mutant results depended on process state; clean-state mutant tests; split NI properties (2026-10-31)
+
+### What failed
+
+In the owner-run Phase 3 run (stage a, commit 6e27f60), step 2 (`mutant-rates`) exited 1.
+- **Combined generator, single-run NI, mutant "extraction ignores control", catch measurement:**
+  missed. All 3,000 budgeted examples ran, derandomized, with no explicit seed. Hypothesis
+  derives the seed from the test function, the same `_run_property` that `check` uses. The
+  count measurement in the same configuration found 4 violations in 3,085 examples, the first
+  at example 885.
+- **The same commit's `check`** (step 1, 239 passed) included the mutant test for this mutant,
+  and that test caught it.
+- **Grammar generator alone:** it caught only "point read of a missing trusted ticket does not
+  halt" (8 in 3,126). It had 0 violations on the other 15 mutants. This is a coverage finding
+  (D-053).
+
+### Cause: Hypothesis's harvested-constants pool, not the example database
+
+The owner's lead suspect was the example database. Tested first, it is ruled out:
+- The main repository's `.hypothesis` has no `examples` directory. It holds only `constants`,
+  `tmp` and `unicode_data`.
+- The mutant tests have passed `database=None` since they were written. `derandomize=True`
+  also implies no database replay.
+- Every experiment below ran with a fresh Hypothesis home (`set_hypothesis_home_dir` to an empty
+  directory), so there was no database and no cache. The results still differed.
+
+**The real cause.** In Hypothesis 6.170.13 (pinned in `uv.lock` since the scaffold commit
+6fbb844), `HypothesisProvider._maybe_draw_constant` draws about 5% of integers and strings
+from a pool of literals. The pool is harvested from every local, non-test module present in
+`sys.modules` (`hypothesis.internal.conjecture.providers._get_local_constants`), and it grows
+as modules load. So under `derandomize=True` the same test function generates different examples
+depending on which modules the process has imported. The on-disk `.hypothesis/constants` is only
+a cache of each file's literals, keyed by source hash, so it does not change results.
+
+**Experiments.** Mutant "extraction ignores control", the existing mutant test (3,000 examples,
+derandomized), each run in a fresh process with a fresh Hypothesis home. Script:
+`scratchpad/nondet.py` (session scratchpad, not in the repository).
+
+| process state | `PYTHONHASHSEED` | local-constants pool | result |
+|---|---|---|---|
+| pytest, the mutant test alone | unset | 295 literals | **missed** |
+| pytest, every test module collected, this test run | unset | 649 | caught |
+| pytest, every test module collected, this test run | 1 | 649 | caught |
+| pytest, every test module collected, this test run | 2 | 649 | caught |
+| script (as `mutant_rates.py` ran it) | unset | 288 | **missed** |
+| script | 1 | 288 | **missed** |
+| pinned (empty pool): pytest, test alone | unset | 0 | missed |
+| pinned (empty pool): pytest, every module collected | unset | 0 | missed |
+
+- `PYTHONHASHSEED` changes nothing; the pool's contents are the same for each process state.
+- `max_examples` is not a cause: both runs set 3,000 explicitly.
+- Once the pool is pinned, the result is the same whatever the process loads. At the old seed
+  and budget, the combined generator does not catch this mutant from a clean state.
+
+**What this means for earlier claims.** No mutant test ever replayed saved examples. But every
+derandomized result since the scaffold was generated with a pool of literals harvested from the
+modules loaded at the time, which includes literals in the code under test (for example, order
+id 7000 in `planners/`). So:
+- **Every "the harness catches mutant X" claim** in the Gate 1 and Gate 2 reports, and D-033
+  and D-049, is true of the process `check` ran in. It is not shown to hold from a clean state.
+  The mutants were real and the counterexamples were real NI violations, but whether a given
+  budget finds them depended on what else was loaded.
+- **The D-049 rate table** was measured by scripts in their own process states, so its rates
+  are not comparable with `check` or with each other.
+- **D-054's adoption test** ("the narrowed-taint mutant is still caught after 970 runs") is in
+  the same position.
+- **Derandomized `check` runs of the NI properties themselves** (200 examples each) are affected
+  the same way. Random fuzz runs (`fuzz`, `fuzz-chunks`) were random anyway: the pool changes the
+  distribution, not the validity of a pass.
+
+Every mutant claim is re-established from a clean state below, and the Gate 3 reviewer is asked
+to check each mutant claim made in earlier gate reports.
+
+### Fix
+
+- **Generation is pinned to the seed** (`tests/determinism.py`). `pin_generation()` replaces
+  Hypothesis's harvested pool with a fixed empty one. `tests/conftest.py` calls it before any
+  test, and `scripts/mutant_rates.py` before any measurement. Hypothesis's own global constants
+  still apply; they are identical in every process.
+  - It patches a private name. `tests/test_determinism.py` checks that the patch is in effect,
+    that loading more local modules adds no constants, and that a non-empty pool changes a fixed
+    seed's examples while the pin restores them. So a Hypothesis upgrade that renames the
+    function fails `check` rather than silently un-pinning.
+- **No example database anywhere:** both Hypothesis profiles (`check`, `fuzz`) set
+  `database=None`, as the mutant tests already did.
+- **Explicit, recorded seeds:** the mutant tests use `@seed(SEED)` (`SEED = 20261031` in
+  `tests/test_ni_mutants.py`), not `derandomize`. Rate measurements use other seeds, recorded in
+  every output row.
+- **Clean state per measurement:** `scripts/mutant_rates.py` runs each measurement in its own
+  process.
+
+**Rejected:**
+- *Import a fixed list of modules before every test, so the pool is always the same:* fragile.
+  Any new module, or a module imported lazily mid-run, changes it again.
+- *Keep derandomize and only add `database=None`:* the database was not the cause.
+- *Upgrade or downgrade Hypothesis:* the feature is current behaviour, and the lockfile pin is
+  deliberate.
+
+### Why "extraction ignores control" and the NI-5 mutant fire less often than at Gate 2
+
+**From the existing per-generator counts** (stage a, not pinned):
+- **Extraction ignores control:** combined 4/3,085; grammar alone 0/3,126. So every combined
+  detection came from the shapes, about two thirds of the combined examples: 4 in about 2,057
+  shape examples, 0.19%. D-049 measured 11/1,552 (0.71%) with shapes only, at the Gate 2 rule.
+  - Grammar dilution accounts for a factor of 1.5 of the drop (0.71% → 0.47%).
+  - The remaining factor of about 2.4 cannot be attributed from these counts. The count runs did
+    not record halts, and both measurements depended on their process's constants pool.
+- **NI-5 mutant:** combined 0/2,132; grammar alone 0/2,140. Gate 2: 9/1,602 (0.56%). Dilution
+  and the 21% halt rate would predict about 6 detections in the ~1,420 shape examples; 0 has
+  probability about 0.2% if those were the only causes.
+
+**Controlled measurement** (pinned, shapes only, seed 20261101, 3,000 examples each, the same
+examples under both rules; `results/phase3b/attribution.jsonl`):
+
+| mutant | Gate 2 rule (taint kept, no halt) | current rule (D-054) |
+|---|---|---|
+| extraction ignores control | 19/3,099 (0.61%) | 12/3,099 (0.39%) |
+| NI-5: re-check treats a relaxed verdict as stricter | 26/3,202 (0.81%) | 5/3,202 (0.16%) |
+
+**Attribution.**
+- **Grammar dilution:** a factor of 1.5 in the combined generator, for both mutants. The split
+  removes it.
+- **Halt exclusion:** halts remove at most the 18–22% of runs that halt (D-054). That is a factor
+  of at most 1.25, which would take 0.61% only to 0.49% and 0.81% only to 0.65%.
+- **The rest is D-054's narrowing, not the halt.** Reads of operator-named tickets are now
+  trusted, so fewer runs have tainted control at all:
+  - fewer extractions run under a tainted `pc`, for "extraction ignores control";
+  - far fewer runs need approval, for NI-5. NI-5 only checks runs that asked for approval.
+
+  For NI-5 that is a factor of about 4 beyond the halts.
+- **Process state:** the stage-a and D-049 numbers also differ by constants pool. The controlled
+  pair above has none.
+
+### Why multi-run NI rejects about 10% of examples as invalid (single-run about 3%)
+
+**Measured invalid shares:**
+
+| property | Gate 2 chunks, 20,000 examples (0905584) | stage-a chunks, 20,000 (6e27f60) | stage-a statistics, 2,000 |
+|---|---|---|---|
+| single-run NI | 2.8% | 3.3% | 2.6% |
+| multirun | 10.8% | 10.7% | 9.0% |
+| NI-5 | 6.9% | 6.5% | 8.0% |
+
+**Cause: size overruns only.** No strategy in `planners/` or `tests/` uses `filter`, `assume` or
+`reject`. Hypothesis's observability output gives a reason for every invalid example
+(`HYPOTHESIS_EXPERIMENTAL_OBSERVABILITY`; `scratchpad/invalid.py`, pinned generation, seed
+20261102, 400 valid examples per shapes property):
+- every one of the 91 invalid examples had status reason "exceeded maximum test case size";
+- single-run had 13 invalid in 413, multirun 45 in 445, NI-5 33 in 433.
+
+Hypothesis caps the number of choices one example may make. The multi-run property draws the
+most: a world, its mutation, a provider failure, the scenario, two plan kinds and tickets, up to
+two random plans, the attacker's rewrite of the case ticket, and possibly a new ticket and its
+body. Where each invalid example ran out, from the last draw it completed:
+- multirun: in a plan draw (25 of 45, last completed draw "plan ticket"), or after the attacker
+  opened or wrote a new ticket (15);
+- NI-5: in the mutated world, after the plan (26 of 33);
+- single-run: during or just after the second world's mutation (12 of 13).
+
+**Does it hide plan or world shapes?** It *under-samples* the largest examples; it does not
+remove a construct.
+- In multirun, 64% of invalid examples had drawn a random shape plan, against 38% of valid ones.
+  So valid examples are skewed towards the scripted plan kinds (`canonical`, `trusted`, `partial`,
+  `credit`) and away from random multi-shape plans combined with a new ticket.
+- Every plan kind, shape kind and mutation still appears in valid examples. But an example whose
+  total draw exceeds the cap can never be tested: for example, three-shape plans in both runs
+  with maximum-length payloads in both edits. This is a bound of the harness, like the depth and
+  size bounds of the grammar generator. It is recorded as a limitation, not hidden.
+- **Not changed now.** Reducing the draw size (for example, deriving payloads from fewer choices)
+  would change every example sequence and every measured mutant rate again. It is listed for
+  Phase 5 hardening.
+
+### Shape changes after the split, and why one seed's rate is not enough
+
+- **Goodwill amount (credit/close shape).** Since D-054 a credit under a plain ticket read is
+  trusted and never reaches the goodwill rule. The amount rejections that the mutant admits always
+  shared a run with another NEEDS_APPROVAL or BLOCK action, so nothing executed and NI-4 (executed
+  runs only) never saw them: 0 detections. The credit/close shape now triggers on the ticket's own
+  text half the time, and per ticket either per extracted id or at most once (`at ids 0`). Seed
+  20261101, 3,090 shapes examples: 7 detections (`results/phase3b/rates.jsonl`).
+- **The same run measured "extraction ignores control" at 0/3,090** (12/3,099 before the credit
+  change). The credit change only redistributes draws among other shapes, so this is the
+  sampling, not a lost construct. Hypothesis does not draw examples independently: within one
+  seed it mutates and re-uses earlier examples, so k/N from one seed is not a binomial estimate
+  and one seed can be far from the mean.
+- **Extraction shape tightened (`_lit_extract`).** A prelude that extracts from a *literal*
+  leaks only through the call count, and the counting extractor shows the count only on
+  token-free text. So with a literal prelude the later literal is now always token-free
+  (`"noop"`); with the row's own text every literal is still drawn. Forced to this shape (pinned,
+  seed 20261101, ~600 examples, `scratchpad/litx_diag.py`): the mutant fired in 16 before, 28
+  after; correct code 0 violations.
+  - The `exists` control now only halts (D-054: a missing operator-named ticket halts both its
+    probe and the deleted case ticket), so it is kept for NI-2 and NI-4 but adds nothing to NI-1.
+- The rate job that measured these was stopped by Claude Code's memory guard after 7 of 32 rows
+  (188 MB free afterwards). It is not restarted in session; rates are owner-run (below).
+
+### Budgets: rule fixed before the measurement
+
+The owner runs `phase3-run --stage rates`: every mutant × property × source, 1,000 examples at
+each of five seeds (202616001–202616005), clean state. Then, for each mutant and source:
+- `p` = the smaller of (a) the Wilson 95% lower bound of the pooled count over 5,000 examples and
+  (b) the smallest per-seed rate. (b) guards against the within-seed dependence above.
+- **Budget** `B = ceil(ln(1000) / p)`, rounded up to a multiple of 500, so the miss probability
+  is under 0.1% if examples were independent at rate `p`. With dependence this is an estimate,
+  stated as such; the stage-b verify then runs every mutant at its budget at the test seed.
+- A shapes mutant with a seed at 0 gets no budget: it is a coverage gap, reported and fixed in
+  the shapes, then re-measured. Grammar rows are the coverage table; a grammar mutant is listed
+  in `GRAMMAR_CATCHES` only if every seed caught it.
+- **`check` keeps a deterministic subset:** for each shapes mutant, the seed and example count of
+  its earliest measured detection (a witness). Generation is pinned, so this replays exactly; it
+  is a regression check that the harness still reaches the mutant, not a detection-rate claim.
+  The full budgets run in the owner-run stage b (`mutant-verify`).
+- **Until the rates are in, the committed `BUDGETS` are placeholders** and `check` has not been
+  run on this code: with them, the 32 mutant cases would take about 30 minutes.
+
+Rejected: *one seed at 3,000 examples* (the 12 → 0 swing above); *the point estimate instead of a
+lower bound* (budgets too small exactly where rates are uncertain); *running the large budgets in
+`check`* (about 7 min today; budgets near ln(1000)/0.2% ≈ 3,500 examples per mutant would add
+tens of minutes).

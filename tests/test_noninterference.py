@@ -33,8 +33,8 @@ from planners.fuzz import (
     counting_extractor,
     mutated,
     payloads,
+    plans,
     raw_extractor,
-    sourced_plans,
     worlds,
 )
 from planners.oracle import credit_if_order_mentioned, refund_amount
@@ -53,9 +53,9 @@ from tests.support import run_world_env
 NEW_TICKET = 4002
 
 
-def ni_property(data: Any) -> None:
+def ni_property(data: Any, source: str = "shapes") -> None:
     world = data.draw(worlds(), label="world")
-    source, plan = data.draw(sourced_plans(world), label="plan")
+    plan = data.draw(plans(world, source), label="plan")
     coverage_events(source, plan)
     w1 = data.draw(mutated(world), label="E1")
     w2 = data.draw(mutated(world), label="E2")
@@ -72,12 +72,12 @@ def ni_property(data: Any) -> None:
     event(f"rule consulted={consulted} projection_equal={equal}")
     event(f"suppressed={bool(x1) != bool(x2)}")
     event(f"rule admitted={any(d.admitted for d in r1.rule_log + r2.rule_log)}")
-    # Per generator: halted runs, and for pairs with no halt (where NI-1 is checked)
-    # whether NI-3 constrained effects (D-054; owner, Phase 3 run).
+    # Halted runs, and for pairs with no halt (where NI-1 is checked) whether NI-3
+    # constrained effects (D-054; owner, Phase 3 run).
     halted = (r1.outcome, r2.outcome).count("halted")
-    event(f"[{source}] halted runs in pair={halted}")
+    event(f"halted runs in pair={halted}")
     if not halted:
-        event(f"[{source}] no halt (NI-1 checked): NI-3 constrains={consulted and equal}")
+        event(f"no halt (NI-1 checked): NI-3 constrains={consulted and equal}")
 
     check_ni1(r1, r2)
     check_ni2(r1)
@@ -97,6 +97,13 @@ def test_noninterference(data: Any) -> None:
     ni_property(data)
 
 
+# Grammar plans run as their own property with their own budget, so they never take
+# examples from the shapes (D-056).
+@given(st.data())
+def test_noninterference_grammar(data: Any) -> None:
+    ni_property(data, "grammar")
+
+
 def _snapshot(db: sqlite3.Connection) -> sqlite3.Connection:
     copy = sqlite3.connect(":memory:")
     db.backup(copy)
@@ -104,7 +111,7 @@ def _snapshot(db: sqlite3.Connection) -> sqlite3.Connection:
 
 
 def _run_plan(
-    data: Any, world: World, tickets: list[int], first: bool, credit: bool
+    data: Any, world: World, tickets: list[int], first: bool, credit: bool, source: str
 ) -> tuple[str, Json]:
     """A random plan, or one of the paths cross-run state matters for, weighted
     towards them: trusted partial or full refunds (mostly in the first run; a
@@ -112,7 +119,12 @@ def _run_plan(
     rule-admitted refund follow) and
     the canonical data-dependent plan (mostly in the second); in a credit
     scenario, the goodwill credit plan in both runs. Returns the plan's origin (its
-    generator for a random plan, else its kind) and the plan."""
+    generator for a random plan, else its kind) and the plan. With ``source="grammar"``
+    every plan is a random grammar plan."""
+    if source == "grammar":
+        plan = data.draw(plans(world, source), label="plan")
+        coverage_events(source, plan)
+        return source, plan
     if credit:
         kinds = ["credit"] * 5
     elif first:
@@ -123,7 +135,7 @@ def _run_plan(
     ticket = data.draw(st.sampled_from(tickets), label="plan ticket")
     event(f"run {1 if first else 2} plan={kind} ticket={ticket}")
     if kind == "random":
-        source, plan = data.draw(sourced_plans(world), label="plan")
+        plan = data.draw(plans(world, source), label="plan")
         coverage_events(source, plan)
         return source, plan
     if kind == "canonical":
@@ -148,7 +160,7 @@ def _ticket_text(world: World) -> st.SearchStrategy[Any]:
     return st.one_of(named, payloads(world))
 
 
-def multirun_property(data: Any) -> None:
+def multirun_property(data: Any, source: str = "shapes") -> None:
     world = data.draw(worlds(), label="world")
     w = data.draw(mutated(world), label="E")
     provider = PaymentMock()
@@ -160,7 +172,7 @@ def multirun_property(data: Any) -> None:
         provider.inject(failure)
     pre1 = _snapshot(env.db)
     credit = data.draw(st.sampled_from([False, False, False, True]), label="credit scenario")
-    origin1, plan1 = _run_plan(data, world, [CASE_TICKET], first=True, credit=credit)
+    origin1, plan1 = _run_plan(data, world, [CASE_TICKET], True, credit, source)
     r1 = run_plan(plan1, env, run_id="run-1")
     check_ni2(r1)
     check_ni4(r1, pre1)
@@ -179,7 +191,7 @@ def multirun_property(data: Any) -> None:
         later = world.extend(tickets=(Ticket(NEW_TICKET, CASE_CUSTOMER, "again", body),))
     env.db.commit()
     pre2 = _snapshot(env.db)
-    origin2, plan2 = _run_plan(data, later, tickets, first=False, credit=credit)
+    origin2, plan2 = _run_plan(data, later, tickets, False, credit, source)
     r2 = run_plan(plan2, env, run_id="run-2")
     event(f"failure={failure}")
     event(f"runs {r1.outcome}/{r2.outcome}")
@@ -200,3 +212,8 @@ def multirun_property(data: Any) -> None:
 @given(st.data())
 def test_noninterference_multirun(data: Any) -> None:
     multirun_property(data)
+
+
+@given(st.data())
+def test_noninterference_multirun_grammar(data: Any) -> None:
+    multirun_property(data, "grammar")

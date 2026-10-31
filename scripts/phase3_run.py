@@ -13,7 +13,7 @@ A failing step is recorded and the run continues, so one run yields every
 result. ``--resume`` skips steps that already passed in ``steps.jsonl`` (the
 chunked fuzz steps also resume chunk by chunk).
 
-Steps:
+Stage ``a`` (``--stage a``, the default; run at 6e27f60):
   a. ``check``;
   b. per-mutant detection, for the mixed generator and the grammar generator alone
      (``scripts/mutant_rates.py``);
@@ -23,7 +23,23 @@ Steps:
   d. dev and holdout evaluations (every configuration, both attacker models);
   e. dev and holdout cap sweeps.
 
-Usage: ``python scripts/tasks.py phase3-run --out <dir> [--resume]``.
+Stage ``b`` (``--stage b``; D-056: after pinning generation and splitting the NI
+properties by plan source):
+  1. ``check``;
+  2. ``mutant-verify``: every mutant against the shapes and the grammar properties
+     from a clean state, at the test seed and budgets (``mutant_rates.py verify``);
+  3. NI statistics, 2,000 randomized examples for each of the six properties;
+  4. chunked random fuzz of the three grammar properties (10 x 1,000 examples each;
+     the shapes were fuzzed in stage a and their generator is unchanged).
+
+The evaluations and sweeps are not repeated: stage b changes no code they run.
+
+Stage ``rates`` (``--stage rates``; D-056, before stage b): clean-state detection
+counts for every mutant, property and source, 1,000 examples at each of five
+seeds (``RATE_SEEDS``). They set the stage-b budgets and the seed witnesses that
+``check`` runs.
+
+Usage: ``python scripts/tasks.py phase3-run --out <dir> [--stage a|b|rates] [--resume]``.
 """
 
 import argparse
@@ -59,7 +75,8 @@ def steps(out: Path) -> list[tuple[str, list[str], dict[str, str], list[str]]]:
         ("check", [PY, "scripts/tasks.py", "check"], {}, []),
         (
             "mutant-rates",
-            [PY, "scripts/mutant_rates.py", "--out", str(out / "mutant_rates.jsonl")],
+            # stage a ran the pre-D-056 script (mixed and grammar-only, no mode argument)
+            [PY, "scripts/mutant_rates.py", "verify", "--out", str(out / "mutant_rates.jsonl")],
             {},
             [],
         ),
@@ -93,6 +110,45 @@ def steps(out: Path) -> list[tuple[str, list[str], dict[str, str], list[str]]]:
     return found
 
 
+GRAMMAR = {
+    NI: "tests/test_noninterference.py::test_noninterference_grammar",
+    MULTIRUN: "tests/test_noninterference.py::test_noninterference_multirun_grammar",
+    NI5: "tests/test_approval_binding.py::test_ni5_executed_set_is_the_approved_set_grammar",
+}
+STATS_SEEDS_B = dict(zip([*GRAMMAR, *GRAMMAR.values()], range(202614700, 202614706), strict=True))
+CHUNK_SEEDS_B = dict(zip(GRAMMAR.values(), (202614800, 202614900, 202615000), strict=True))
+
+
+def steps_b(out: Path) -> list[tuple[str, list[str], dict[str, str], list[str]]]:
+    stats_env = {"HYPOTHESIS_PROFILE": "fuzz", "WARRANT_FUZZ_EXAMPLES": "2000"}
+    verify = [PY, "scripts/mutant_rates.py", "verify", "--resume"]
+    verify += ["--out", str(out / "mutant_verify.jsonl")]
+    found: list[tuple[str, list[str], dict[str, str], list[str]]] = [
+        ("check", [PY, "scripts/tasks.py", "check"], {}, []),
+        ("mutant-verify", verify, {}, []),
+    ]
+    for test, seed in STATS_SEEDS_B.items():
+        cmd = [PY, "-m", "pytest", test, "--hypothesis-show-statistics"]
+        cmd += [f"--hypothesis-seed={seed}", "-p", "no:cacheprovider", "-q"]
+        found.append((f"ni-stats-{test.rsplit('::', 1)[1]}", cmd, stats_env, []))
+    for test, seed in CHUNK_SEEDS_B.items():
+        cmd = [PY, "scripts/fuzz_chunks.py", "--resume", "--chunks", "10", "--examples", "1000"]
+        cmd += ["--log", str(out / "fuzz_chunks_grammar.jsonl"), "--test", test]
+        cmd += ["--base-seed", str(seed)]
+        found.append((f"fuzz-chunks-{test.rsplit('::', 1)[1]}", cmd, {}, []))
+    return found
+
+
+RATE_SEEDS = range(202616001, 202616006)
+
+
+def steps_rates(out: Path) -> list[tuple[str, list[str], dict[str, str], list[str]]]:
+    cmd = [PY, "scripts/mutant_rates.py", "rates", "--resume", "--examples", "1000"]
+    cmd += [f"--seed={s}" for s in RATE_SEEDS]
+    cmd += ["--out", str(out / "rates.jsonl")]
+    return [("mutant-rates", cmd, {}, [])]
+
+
 def passed(log: Path) -> set[str]:
     if not log.exists():
         return set()
@@ -104,6 +160,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--stage", choices=["a", "b", "rates"], default="a")
     args = parser.parse_args(argv)
     if git("status", "--porcelain"):
         print("refusing to run: the working tree is not clean (commit or use a clean worktree)")
@@ -117,7 +174,7 @@ def main(argv: list[str]) -> int:
     out.mkdir(parents=True, exist_ok=True)
     done = passed(log)
     failures = 0
-    plan = steps(out)
+    plan = {"a": steps, "b": steps_b, "rates": steps_rates}[args.stage](out)
     for i, (name, cmd, env, copies) in enumerate(plan, 1):
         if name in done:
             print(f"[{i}/{len(plan)}] {name}: already passed, skipped", flush=True)

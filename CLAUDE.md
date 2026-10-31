@@ -67,35 +67,33 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 - `eval --suite holdout` / `sweep --suite holdout`: the same against the held-out injections
   (`evals/tasks/holdout/`, independent red-team agent, D-043); writes `results/holdout.json`,
   `results/audit_holdout.sqlite`, `results/cap_sweep_holdout.json`. Never tune against it.
-- `phase3-run --out DIR [--resume]`: the owner-run Phase 3 measurements (`scripts/phase3_run.py`):
-  check, per-mutant detection (`scripts/mutant_rates.py`, mixed and grammar-only generators), NI
-  statistics, chunked random fuzz, both evals, both sweeps. Refuses a dirty tree; logs each step
-  and its exit code to `DIR/steps.jsonl` and `DIR/NN-<step>.log`; continues past failures.
-  Run only outside a session, from a clean worktree (DECISIONS "Phase 3 owner run").
+- `phase3-run --out DIR [--stage a|b|rates] [--resume]`: the owner-run Phase 3 measurements
+  (`scripts/phase3_run.py`). Stage a (done at 6e27f60): check, mutants, NI statistics, chunked
+  fuzz, both evals, both sweeps. Stage rates: clean-state per-mutant detection counts, 5 seeds x
+  1,000 examples (`scripts/mutant_rates.py rates`). Stage b: check, `mutant_rates.py verify` at
+  the budgets, NI statistics for the six split properties, grammar fuzz chunks. Refuses a dirty
+  tree; logs each step to `DIR/steps.jsonl` and `DIR/NN-<step>.log`; continues past failures.
+  Run only outside a session, from a clean worktree (DECISIONS "Phase 3 owner run", D-056).
 - `eval-llm`: evaluation with the local model. Phase 4, not yet.
 - `report`: regenerate `docs/RESULTS.md`. Phase 5, not yet.
 - `demo`: scripted demonstration. Phase 5, not yet.
 
 ## Current status
 
-Phase: **3 in progress, waiting for two owner-run commands** (Gate 2 approved 2026-10-30; see
-DECISIONS "Gate 2 outcome", "Phase 3 plan", D-051 to D-055 and "Phase 3 owner run"). The Phase 3
-code is on branch `phase3-wip`, not merged; a full `check` has not yet passed on it. With Claude
-Code closed, the owner runs:
-1. the Gate 2 fuzz (command in DECISIONS "Gate 2 outcome"; worktree
-   `C:\Users\manki\warrant-fuzz-gate2` at 0905584), then
-2. the Phase 3 run (command in DECISIONS "Phase 3 owner run"; worktree
-   `C:\Users\manki\warrant-phase3`), which writes `results/phase3/`.
+Phase: **3 in progress** (Gate 2 approved 2026-10-30). Code on branch `phase3-wip`, not merged.
+Stage a of the owner run is verified (DECISIONS "Phase 3 owner run: stage a results"); its
+mutant step failed, diagnosed in D-056: mutant results depended on Hypothesis's harvested
+constants pool (process state), not on the example database. Fixed by pinning generation
+(`tests/determinism.py`), explicit seeds, and NI properties split by plan source.
 
-When they return:
-- verify `results/fuzz_chunks.jsonl` (60 chunks, seeds 202610800–819, 202610900–919,
-  202611000–019, commit 0905584) and record it in D-050;
-- verify every step in `results/phase3/steps.jsonl` and its logs, and record the results: the
-  D-053 grammar-only mutant table, the D-054 halt shares (compare with D-050) and burden, and
-  the D-055 free memory with Claude Code closed. Write `docs/RESULTS.md` ("undefended (with
-  execution hygiene)"; D-052);
-- run the Gate 3 independent review (give the reviewer the D-054 test table and ask it to check
-  each row), post the report and stop at Gate 3.
+Next, in order:
+1. Owner runs `phase3-run --stage rates` from a clean worktree at the committed head (command in
+   the latest gate/status message; D-056 "Budgets"). Not in session: the memory guard stopped it.
+2. Set `BUDGETS`, the check witnesses and `GRAMMAR_CATCHES` in `tests/test_ni_mutants.py` by the
+   D-056 rule; report rates, budgets and the grammar coverage table; run `check`.
+3. Owner runs `phase3-run --stage b`. Then verify, fill the RESULTS NI section, run the Gate 3
+   review (D-054 test table row by row, and every mutant claim in earlier gate reports: D-033,
+   D-049, D-050, D-054, Gate 1/2 reports), post the report, stop at Gate 3.
 
-Never run the fuzz or the Phase 3 run inside a session (Claude Code's memory guard stops them).
-`check` takes about 7 min.
+Until step 2, `BUDGETS` are placeholders and `check` has not been run on this code.
+Never run the fuzz or the owner-run stages inside a session. `check` takes about 7 min.
