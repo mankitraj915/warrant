@@ -149,7 +149,9 @@ PROPERTIES: dict[str, tuple[dict[str, tuple[Any, str, Any]], Any]] = {
     "multirun": (MULTIRUN_MUTANTS, multirun_property),
     "NI-5": (NI5_MUTANTS, ni5_property),
 }
-SEED = 20261031  # the full-budget seed (owner-run verify); rates used other seeds (D-056)
+# The owner-run verify checks every budget at these three seeds, none used to set a budget
+# (rates: 202616001-005; D-056 "Validation").
+VERIFY_SEEDS = (202617001, 202617002, 202617003)
 # Examples per (property, plan source), from the clean-state rates (results/phase3-rates,
 # results/phase3b/budgets.json): for each mutant, its latest first detection over five seeds
 # plus ln(1000)/p, p the 95% lower bound of its pooled rate, rounded up to 500; the property
@@ -202,9 +204,7 @@ WITNESSES: dict[tuple[str, str, str], int] = {
 }
 
 
-def _run_property(
-    max_examples: int, prop_fn: Any = ni_property, source: str = "shapes", seed_: int = SEED
-) -> Callable[[], None]:
+def _run_property(max_examples: int, prop_fn: Any, source: str, seed_: int) -> Callable[[], None]:
     @seed(seed_)
     @settings(
         max_examples=max_examples,

@@ -12,11 +12,14 @@ Modes:
   seed are not independent (Hypothesis explores around earlier examples), so
   rates come from several seeds. These rates set the budgets in
   ``tests/test_ni_mutants.py`` (rule in DECISIONS D-056).
-- ``verify``: for every mutant, property and source, run the mutant test as
-  ``check`` runs it (its seed ``SEED``, its budget ``BUDGETS``) and record caught
-  or missed, plus a count run over the same examples. A shapes miss, or a miss
-  of a mutant listed in ``GRAMMAR_CATCHES``, makes the exit code 1; other grammar
-  rows are the coverage table.
+- ``verify``: for every mutant, property and source, run the property at its
+  budget (``BUDGETS``) at each of ``VERIFY_SEEDS`` (fresh: none set a budget),
+  stopping at the first violation, and record caught or missed and the example
+  index of the detection. A shapes miss, or a miss of a mutant listed in
+  ``GRAMMAR_CATCHES``, makes the exit code 1 and is followed by an ``extend``
+  count run at four times the budget at the same seed, which records where the
+  first detection actually came (for a corrected budget, reported separately).
+  Other grammar rows are the coverage table.
 
 ``--rule gate2`` runs with the Phase 1-2 existence rule (taint kept, no halt), to
 attribute a rate change to D-054. One JSON line per measurement goes to
@@ -51,7 +54,7 @@ from tests.test_ni_mutants import (  # noqa: E402
     BUDGETS,
     GRAMMAR_CATCHES,
     PROPERTIES,
-    SEED,
+    VERIFY_SEEDS,
     _run_property,
 )
 
@@ -84,11 +87,17 @@ def count(prop_fn: Any, source: str, examples: int, seed_: int) -> dict[str, Any
 
 
 def catch(prop_fn: Any, source: str, examples: int, seed_: int) -> dict[str, Any]:
+    calls = [0]
+
+    def counted(data: Any, source_: str) -> None:
+        calls[0] += 1
+        prop_fn(data, source_)
+
     try:
-        _run_property(examples, prop_fn, source, seed_)()
+        _run_property(examples, counted, source, seed_)()
     except NIViolation:
-        return {"caught": True}
-    return {"caught": False}
+        return {"caught": True, "detected_at": calls[0]}
+    return {"caught": False, "detected_at": None, "calls": calls[0]}
 
 
 def one(spec: dict[str, Any]) -> dict[str, Any]:
@@ -101,7 +110,7 @@ def one(spec: dict[str, Any]) -> dict[str, Any]:
     module, attribute, value = mutants[spec["mutant"]]
     setattr(module, attribute, value)
     start = time.monotonic()
-    measure = count if spec["measurement"] == "count" else catch
+    measure = catch if spec["measurement"] == "catch" else count
     result = measure(prop_fn, spec["source"], spec["examples"], spec["seed"])
     return {**spec, **result, "seconds": round(time.monotonic() - start, 1)}
 
@@ -142,8 +151,10 @@ def specs(args: argparse.Namespace) -> list[dict[str, Any]]:
                         )
                 else:
                     budget = BUDGETS[prop, source]
-                    for m in ("catch", "count"):
-                        out.append({**base, "measurement": m, "examples": budget, "seed": SEED})
+                    for seed_ in VERIFY_SEEDS:
+                        out.append(
+                            {**base, "measurement": "catch", "examples": budget, "seed": seed_}
+                        )
     return out
 
 
@@ -179,34 +190,40 @@ def main(argv: list[str]) -> int:
         return 0
     assert args.out is not None, "--out is required"
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    done: set[tuple[Any, ...]] = set()
+    done: dict[tuple[Any, ...], dict[str, Any]] = {}
     if args.resume and args.out.exists():
         lines = args.out.read_text(encoding="utf-8").splitlines()
-        done = {key(json.loads(line)) for line in lines if line}
+        done = {key(row): row for row in map(json.loads, filter(None, lines))}
     commit = git_commit()
-    missed = 0
-    for spec in specs(args):
+
+    def measured(spec: dict[str, Any]) -> dict[str, Any] | None:
         if key(spec) in done:
-            continue
+            return done[key(spec)]
         cmd = [sys.executable, __file__, "one", "--spec", json.dumps(spec)]
         proc = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
         if proc.returncode != 0:
             print(proc.stdout + proc.stderr, flush=True)
-            return proc.returncode
-        row = json.loads(proc.stdout.strip().splitlines()[-1])
+            return None
+        row: dict[str, Any] = json.loads(proc.stdout.strip().splitlines()[-1])
         row["commit"] = commit
-        if row["measurement"] == "count":
+        if row["measurement"] != "catch":
             row["rate"] = row["violations"] / max(row["examples"], 1)
             row["rate_wilson95_low"] = wilson_low(row["violations"], row["examples"])
-        missed += (
-            args.mode == "verify"
-            and row["measurement"] == "catch"
-            and not row["caught"]
-            and required(row)
-        )
         with args.out.open("a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
         print(json.dumps(row), flush=True)
+        return row
+
+    missed = 0
+    for spec in specs(args):
+        row = measured(spec)
+        if row is None:
+            return 2
+        if row["measurement"] == "catch" and not row["caught"] and required(row):
+            missed += 1  # a miss against the D-056 rule: find where detection came
+            extend = {**spec, "measurement": "extend", "examples": 4 * spec["examples"]}
+            if measured(extend) is None:
+                return 2
     return 1 if missed else 0
 
 

@@ -27,7 +27,8 @@ Stage ``b`` (``--stage b``; D-056: after pinning generation and splitting the NI
 properties by plan source):
   1. ``check``;
   2. ``mutant-verify``: every mutant against the shapes and the grammar properties
-     from a clean state, at the test seed and budgets (``mutant_rates.py verify``);
+     from a clean state, at the budgets and three fresh seeds; a required miss is
+     followed by a run at four times the budget (``mutant_rates.py verify``);
   3. NI statistics, 2,000 randomized examples for each of the six properties;
   4. chunked random fuzz of the three grammar properties (10 x 1,000 examples each;
      the shapes were fuzzed in stage a and their generator is unchanged).

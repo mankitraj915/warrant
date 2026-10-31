@@ -1992,7 +1992,7 @@ What this does and does not claim:
   mutant's miss probability at its budget is under 0.1%.
 - It is not a measured 0.1% bound. Measuring one would take thousands of seeds per mutant. With
   five seeds per mutant, every first detection is below its budget (0 of 5 seeds miss).
-- The owner-run stage b checks each budget at a sixth seed (`SEED` 20261031), not used to set it.
+- The owner-run stage b checks each budget at three fresh seeds ("Validation" below).
 
 Rejected:
 - *Fix the shapes for the three mutants:* they were not gaps, and tuning the shapes toward known
@@ -2045,6 +2045,87 @@ needs no minimal example). The 21 tests (20 mutants plus a completeness check) t
 empty `summary` field. The extra `-q` is removed, so each chunk row's `summary` and each step log
 end with the passed/failed counts. `check` used a single `-q` and already printed it (stage a:
 "239 passed").
+
+### Why first detections come late: the mechanism, checked (owner request, 2026-10-31)
+
+**The owner's proposed mechanism:** Hypothesis generates small examples first and builds larger
+ones from earlier examples, so examples are not independent and deep plans or multi-run shapes
+appear late.
+
+**Test 1: plan size by example index.** Generation is pinned, and Hypothesis's choices do not
+depend on test outcomes while every example passes. So rerunning the correct-code shapes
+properties at the five rate seeds regenerates the rate runs' examples. Each plan's JSON node
+count, top-level steps and depth were recorded by example index
+(`results/phase3b/plan_sizes.jsonl`, 15,000 examples; `plan_sizes_long.jsonl`, NI-5 at seed
+202616004 to 3,000; script `scratchpad/sizes.py`).
+
+| property | examples 1–50 | 51–200 | 201–500 | 501–1,000 | 1,001–4,000 |
+|---|---|---|---|---|---|
+| NI: mean plan nodes (mean top-level steps) | 61 (2.9) | 84 (3.8) | 85 (4.0) | 80 (3.7) | 74 (3.4) |
+| NI-5 | 69 (3.1) | 79 (3.6) | 87 (4.1) | 83 (3.7) | 93 (4.8) |
+| NI-5, seed 202616004 to 3,000 | 78 (3.6) | 88 (4.1) | 89 (4.2) | 85 (3.9) | 76–84 (3.6–4.0) |
+| multirun: random plans per example | 0.86 | 0.41 | 0.46 | 0.39 | 0.37 |
+
+- **Small examples first: true, but only for the first ~50 examples.** After that, plan size,
+  steps and depth (17 or more levels in 12–26% of plans in every window) are flat.
+- So the size ramp does not explain first detections at 1,231–2,681. Deep plans are as common
+  at example 100 as at example 2,000.
+- In multirun the early examples draw *more* random plans, not fewer.
+
+**Test 2: are detections clustered?** Every violation index of "goodwill rule ignores amount",
+shapes NI, five rate seeds × 3,000 examples (`results/phase3b/violation_indices.jsonl`; script
+`scratchpad/viol_idx.py`). Violations per window of 250 examples:
+
+| seed | violations | first | per 250-example window | variance / mean |
+|---|---|---|---|---|
+| 202616001 | 8 | 224 | 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6 | 4.4 |
+| 202616002 | 22 | 205 | 7, 0, 9, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0 | 5.9 |
+| 202616003 | 13 | 1,596 | 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 6, 0 | 5.5 |
+| 202616004 | 67 | 168 | 10, 14, 3, 9, 0, 4, 0, 6, 0, 0, 11, 10, 0 | 4.7 |
+| 202616005 | 13 | 1,741 | 0, 0, 0, 0, 0, 0, 3, 0, 7, 0, 0, 3, 0 | 4.2 |
+
+Independent examples would give a ratio near 1. Detections come in **bursts** (3–14 in one
+window), separated by stretches of 1,000–2,500 examples with none.
+
+**The mechanism the data supports:** Hypothesis builds new examples by mutating and splicing
+earlier ones. Once it generates an example in a detecting region, the next examples stay near
+it, and a burst follows; then it moves away. Late first detection is waiting for the first
+burst. The independent unit is the burst, not the example. Plan size is not the cause.
+
+**Consequence for the accepted budget rule.** `W + ln(1000)/p` counts examples as independent
+after the warm-up, so it is optimistic. For goodwill-amount, about 16 bursts in 15,000
+examples means roughly one burst per 940 examples. At its budget of 3,000 that gives a
+per-seed miss probability of roughly `exp(-3000/940)`, about 4%, not 0.1%. This is an estimate
+from one mutant; the budgets are not changed on it. The fresh-seed validation below measures
+the misses, and a corrected budget is reported separately.
+
+### Validation at fresh seeds (owner, 2026-10-31)
+
+- **Seeds:** stage b's `mutant-verify` runs every (property, source) budget at three seeds,
+  `VERIFY_SEEDS` = 202617001, 202617002 and 202617003. None was used to set a budget; the rates
+  used 202616001–202616005, and the `check` witnesses use rate seeds.
+- **Each run** stops at its first violation and records the example index (`detected_at`).
+- **A required row that misses** is a miss against the D-056 rule. It makes the step exit 1 and
+  is followed by an `extend` run at the same seed, four times the budget, which records where
+  detection actually came.
+- **Budgets are not raised in place.** Each miss and its corrected budget are reported in a
+  separate table here.
+- The per-budget count runs of the earlier verify design are dropped; the rates already
+  measured them, and the time goes to the extra seeds.
+
+**Already observed (in session, before stage b).** A smoke test of the new verify on NI-5 ran
+the real seeds. The tree differed from 0927aef only in the verify harness, not in generator or
+kernel code, and generation is pinned, so stage b reproduces these exactly:
+
+| mutant | seed | budget | result |
+|---|---|---|---|
+| NI-5: re-check treats a relaxed verdict as stricter | 202617001 | 8,000 | caught at 432 |
+| same | 202617002 | 8,000 | **missed**; `extend` (32,000): first detection at 9,080, 32 violations in 34,350 calls |
+| same | 202617003 | 8,000 | caught at 525 |
+
+This is a miss against the D-056 rule, as the burst analysis predicts. The verify seeds are kept
+as they are: changing them after seeing a miss would be choosing seeds by result. More misses
+are expected in stage b (goodwill-amount, about 4% per seed by the burst estimate).
 
 ## D-057 Held-out mutants at Gate 3 (owner, 2026-10-31)
 

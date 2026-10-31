@@ -92,7 +92,8 @@ Stage rates is verified and the budgets, `GRAMMAR_CATCHES` and the check witness
 Next, in order:
 1. Owner runs `phase3-run --stage b` from a clean worktree at the committed head (command in the
    latest status message).
-2. Verify it; fill the RESULTS NI section.
+2. Verify it: every budget at three fresh seeds; misses and corrected budgets go in a separate
+   D-056 table (one NI-5 miss is already known, D-056 "Validation"). Fill the RESULTS NI section.
 3. Gate 3: the independent review (D-054 test table row by row, and every mutant claim in
    earlier gate reports: D-033, D-049, D-050, D-054, Gate 1/2 reports), plus the held-out
    mutants (D-057: a reviewer that sees only DESIGN.md and kernel/ writes 3-5 mutants, run at
