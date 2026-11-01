@@ -2385,3 +2385,81 @@ the run partway; it was not restarted in session.
 - Per D-057, the generator is not changed before this report.
 
 The complete held-out run, at one commit, is in the owner-run stage c (`mutant-heldout`).
+
+## Gate 3 baseline: stage c results (commit 7da1652, verified 2026-11-02)
+
+The owner ran `phase3-run --stage c` with Claude Code closed. Three steps, all exit 0, every row
+at 7da1652, tree clean before and after (`results/phase3c/steps.jsonl`).
+
+| step | exit | time | result |
+|---|---|---|---|
+| `check` | 0 | 47 s | 250 passed in 43.97 s |
+| `mutant-kseed` | 0 | 536 s | 170 rows; every required mutant caught by at least one of its k seeds |
+| `mutant-heldout` | 0 | 4,122 s | 248 rows; 2 of 5 held-out mutants caught, 3 missed at every design |
+
+**k-seed designs at fresh seeds 202618001 onwards** (D-058; seeds caught / seeds run, against the
+design's `q_low`):
+
+| property | source | mutant | n × k | seeds caught | design q_low | caught |
+|---|---|---|---|---|---|---|
+| NI | shapes | at ignores index label | 250 × 10 | 8/10 (80%) | 0.400 | yes |
+| NI | shapes | extraction ignores control | 2,000 × 4 | 3/4 (75%) | 0.688 | yes |
+| NI | shapes | extractor output labelled trusted | 250 × 4 | 4/4 | 0.688 | yes |
+| NI | shapes | filter ignores predicate labels | 500 × 4 | 3/4 (75%) | 0.688 | yes |
+| NI | shapes | goodwill rule ignores amount | 250 × 22 | 12/22 (55%) | 0.193 | yes |
+| NI | shapes | goodwill rule ignores origin set | 1,000 × 4 | **2/4 (50%)** | 0.688 | yes |
+| NI | shapes | map body pc ignores list structure | 500 × 4 | 4/4 | 0.688 | yes |
+| NI | shapes | ownership rule drops uniqueness | 250 × 4 | **2/4 (50%)** | 0.688 | yes |
+| NI | shapes | ownership rule ignores origin set | 500 × 4 | 4/4 | 0.688 | yes |
+| NI | shapes | point read of a missing trusted ticket does not halt | 250 × 4 | 4/4 | 0.688 | yes |
+| NI | shapes | policy ignores pc | 250 × 4 | 4/4 | 0.688 | yes |
+| NI | grammar | extractor output labelled trusted | 250 × 14 | 7/14 (50%) | 0.289 | yes |
+| NI | grammar | map body pc ignores list structure | 250 × 22 | 9/22 (41%) | 0.193 | yes |
+| NI | grammar | point read of a missing trusted ticket does not halt | 500 × 4 | 4/4 | 0.688 | yes |
+| NI | grammar | policy ignores pc | 1,000 × 4 | 4/4 | 0.688 | yes |
+| multirun | shapes | execution writes no record before the provider call | 1,000 × 4 | 4/4 | 0.688 | yes |
+| multirun | shapes | goodwill rule drops the per-customer bound | 250 × 4 | 4/4 | 0.688 | yes |
+| multirun | shapes | ownership rule drops never-refunded order | 250 × 14 | 12/14 (86%) | 0.289 | yes |
+| multirun | shapes | ownership rule drops once-per-ticket across runs | 250 × 22 | 12/22 (55%) | 0.193 | yes |
+| NI-5 | shapes | re-check treats a relaxed verdict as stricter | 1,000 × 14 | 9/14 (64%) | 0.289 | yes |
+
+**Reading.**
+- All 20 required mutants were caught. No design missed.
+- Two observed per-seed shares fall below their design's lower bound. "Goodwill rule ignores origin
+  set" and "ownership rule drops uniqueness" were each caught at 2 of 4 seeds, against
+  `q_low = 0.688`.
+  - At an observed share of 0.5, k = 4 gives an estimated miss probability of about 6%, not 1%.
+  - So the 8-seed estimates were optimistic for those two. The n was chosen on the same seeds it
+    was evaluated on, the bias D-058 warned about.
+  - No tuning follows (owner: no further iteration). The fresh-seed shares are now part of the
+    record, and the stage-d run measures them again at new seeds.
+
+**Held-out mutants (D-057)**, at `HELDOUT_DESIGN`, stopping at the first catching seed:
+
+| held-out mutant | result | examples run |
+|---|---|---|
+| ownership amount at most refundable | caught: NI grammar, seed 202618007, example 862 | 7,197 |
+| goodwill reason not required trusted | **missed at every design** | 108,462 |
+| contains ignores element labels | **missed at every design** | 108,462 |
+| order note labelled trusted | caught: NI grammar, seed 202618001, example 664 | 664 |
+| approval hash not compared | **missed at every design** | 108,462 |
+
+**Three permanent held-out misses**, each analysed after the result, with no generator change
+before it:
+- **Goodwill reason:** no generator produces an untrusted credit reason that is also a valid
+  reason code (Gate 3 responses).
+- **`contains` element labels:**
+  - The mutant matters only when `contains` runs over a list whose structure is trusted but whose
+    elements carry untrusted labels, and its result then selects an effect.
+  - The shapes never build such a list (a `map` result over trusted rows whose body reads an
+    untrusted field), and the grammar did not in 108,462 examples.
+  - The reviewer's narrower "contains ignores list labels" mutant (structure label dropped) was
+    caught; this one is about element labels.
+- **Approval hash:**
+  - The NI-5 harness's approver always answers with the current run's hash. So a run whose
+    executed set differs from the approved set is never constructed (review finding 8).
+  - Approval binding is tested by unit tests (replay, cross-run), but the property-based harness
+    cannot see this mutant.
+
+These three stay in RESULTS as misses. Post-fix results are reported separately; the three no
+longer count as held out once the generators change.

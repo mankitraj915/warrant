@@ -232,9 +232,7 @@ The per-mutant table is in DECISIONS D-058.
 - **The shape generator was adjusted while known mutants were being measured** (D-049 to D-056).
   So "every known mutant is caught" is weaker evidence than the numbers suggest. For that reason
   a separate reviewer wrote five new mutants without seeing the generator or the tests (D-057).
-  So far one was caught, and one, "the goodwill rule no longer requires a trusted credit reason",
-  was **missed at every design**: no generator ever produces an untrusted credit reason that is
-  also a valid reason. Three are not yet complete (owner-run stage c).
+  The result is below.
 - **The Gate 3 review found mechanisms the NI harness cannot see:** a concurrent run's
   recovery deleting another run's in-flight refund record (a double refund, reproduced), the
   execution re-check's stop on a stricter verdict (no test notices it disabled), and the
@@ -243,6 +241,35 @@ The per-mutant table is in DECISIONS D-058.
 - **What `check` runs:** each mutant's earliest recorded detection, replayed exactly. That is a
   regression check, not the detection claim. The k-seed designs run in an owner-run script
   (`phase3-run --stage c`).
+
+### Gate 3 baseline (commit 7da1652, owner-run stage c)
+
+**k-seed designs at fresh seeds:** all 20 required mutants were caught by at least one of
+their k seeds (`results/phase3c/mutant_kseed.jsonl`; DECISIONS "Gate 3 baseline").
+- For two mutants the observed per-seed share was below the design's lower bound: "goodwill rule
+  ignores origin set" and "ownership rule drops uniqueness", each caught at 2 of 4 seeds against
+  an estimated 0.69.
+- At that observed share, their estimated miss probability is about 6%, not 1%. The estimates
+  were optimistic.
+
+**Held-out mutants (permanent record).** Written blind to the generators and tests; run at each
+property's largest design; caught if any seed of any property catches it.
+
+| held-out mutant | Gate 3 result |
+|---|---|
+| the ownership rule admits any amount up to the refundable amount | caught (example 862, 7th seed) |
+| the labelling map loses `orders.customer_note` | caught (example 664, 1st seed) |
+| the goodwill rule no longer requires a trusted credit reason | **missed** (108,462 examples) |
+| `contains` ignores the labels of the list's elements | **missed** (108,462 examples) |
+| approval consumption ignores the approved hash | **missed** (108,462 examples) |
+
+**Why each was missed** (analysed after the result):
+- No generator produced an untrusted credit reason that is also a valid reason code.
+- No generator built a trusted list of untrusted elements and tested membership in it.
+- The harness's approver always approves the current hash.
+
+These are gaps in the test generators, not known kernel bugs. Post-fix results are reported
+separately below. These three mutants no longer count as held out.
 
 **What the random-plan (grammar) generator catches on its own** (5 rate seeds × 1,000 examples,
 plus 3 stage-b seeds at 4,000):

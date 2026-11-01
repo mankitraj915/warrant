@@ -92,10 +92,30 @@ Stages rates and b are verified (DECISIONS "stage b results"). Mutant detection 
 independent seeds per mutant (D-058, the owner's final redesign; no further iteration). RESULTS
 has its NI section.
 
-**At Gate 3, waiting for the owner** (report posted 2026-11-01; DECISIONS "Gate 3 independent
-review: responses" and "Held-out mutants (D-057): result so far"). Open:
-- review findings 1-3 (recovery race, high; plain-read credit bound; untested stricter-stop),
-  proposed fixes not applied pending the owner's decision;
-- the owner-run stage c (k-seed designs and the complete held-out run) has not run.
+Stage c is verified and recorded as the Gate 3 baseline (DECISIONS "Gate 3 baseline"):
+every required mutant caught; held-out 2 caught, 3 missed (permanent entries in RESULTS).
+
+**Owner delegation (2026-11-02): ship v1 autonomously.** Needs the owner's explicit yes:
+(a) rewriting git history, (b) making the GitHub repo public, (c) weakening the invariant, a
+test or a policy. Every gate still gets an independent reviewer; act on its findings, record
+them in DECISIONS. Public docs (README, ADRs, WHAT_WENT_WRONG) discuss engineering only, not
+the tools used to build the project, and never claim the owner wrote code or prose by hand.
+Memory-heavy runs (fuzz, k-seed, held-out, evals at scale, models) go to owner-run commands or
+GitHub Actions, never in session. Plan and progress (tick as done):
+1. [x] 1.1 Record stage c as the Gate 3 baseline.
+2. [ ] Step 2: history scan (report; a rewrite needs the owner); merge phase3-wip into main
+   --no-ff; annotated tags gate-0..gate-3; private GitHub repo; push; releases; labels; one
+   issue per Gate 3 finding; PR template; Actions (check on PRs; tests-fail-on-base job;
+   manual owner-run-stages workflow); record runner memory and free-minute limits.
+3. [ ] Steps 1.2/1.3 as issue + branch + PR each (merge commits): findings 1-9 with
+   regression tests failing on 7da1652; generator coverage (domain-valid values in untrusted
+   fields); post-fix held-out result reported separately.
+4. [ ] Step 3 (stage d) on the fixed commit: check, k-seed at fresh seeds, post-fix held-out,
+   evals and sweeps; update RESULTS; re-review; tag gate-3 at the final commit.
+5. [ ] Step 4: v1 ships without a local LLM planner; optional CI-only small-model job.
+6. [ ] Step 5: README, docs/WHAT_WENT_WRONG.md, docs/adr/ (8-10), docs/PROCESS.md,
+   docs/STUDY_GUIDE.md, code trimming pass, `tasks.py demo` plus a committed transcript.
+7. [ ] Step 6: final skeptical review, fixes, fresh-clone reproduction, tag v1.0 and release,
+   hand-off report.
 
 Never run the fuzz or the owner-run stages inside a session. `check` takes about 1 min.
