@@ -2480,3 +2480,47 @@ Scope: every commit on every branch (43 commits), content and messages (`git log
 public account name. The current tree replaces the paths with `<repo>` and `<worktree-…>`
 placeholders. History keeps them. The owner can still choose a rewrite before making the
 repository public; that needs the owner's yes (delegation limit a).
+
+## D-060 Continuous integration on GitHub Actions (2026-11-02; issue #14)
+
+**Workflows** (`.github/workflows/`):
+- `check.yml`: `tasks.py check` on every pull request and on pushes to main.
+- `new-tests-fail-on-base.yml`: `scripts/new_tests_fail_on_base.py`.
+  - It collects the test ids a pull request adds, checks the base commit out in a temporary
+    worktree, copies the PR's changed test files over it, and runs only the new tests there.
+  - Every new test must fail, error or be uncollectable on base. One that passes or skips fails
+    the job.
+  - Checked locally against base c4b52a6: it reported the one renamed test as passing on base and
+    exited 1.
+- `owner-stages.yml`: a manual trigger that runs `phase3-run --stage <a|b|c|d|rates>` on a
+  runner.
+  - It records `runner.json` (commit, run id, image, CPU count and model, total and available
+    memory, Python).
+  - It uploads the stage's output directory as an artifact, kept 90 days. Seeds are fixed in the
+    scripts and recorded in every result row.
+- **Pull request template:** Problem; Failing test (fails on base); Fix; Evidence; What this does
+  not prove.
+
+**GitHub's limits** (GitHub documentation, read 2026-11-02):
+- **Standard runner, private repository:** Linux, 2 CPUs, 8 GB RAM, 14 GB SSD. Public
+  repositories get 4 CPUs and 16 GB. ("GitHub-hosted runners" reference.)
+- **Job limit:** "Each job in a workflow can run for up to 6 hours of execution time" ("Actions
+  limits"). The stage workflow sets 355 minutes.
+- **Free plan:** Actions usage is included as a monetary amount, $12 USD per month, for private
+  repositories. At the listed Linux 2-core rate of $0.006 per minute, that is about 2,000
+  minutes; that figure is my arithmetic, not a number the page states. Standard runners in
+  public repositories are free. Artifact storage on GitHub Free is 500 MB.
+
+**Why.** The laptop's free memory has fallen to 47.5 MB with nothing else of ours running (D-055).
+A runner with 8 GB gives the owner-run stages a second, independent place to run. **Local
+reproduction stays primary.** Every stage still runs from a clean local worktree with the same
+command, and nothing in the repository requires CI.
+
+**Stage d** (added here, `phase3-run --stage d`), for after the Gate 3 fixes:
+- `check`;
+- the k-seed designs and the former held-out mutants at fresh seeds from 202619001
+  (`--seed-base`), with no re-estimation;
+- both evaluations and both sweeps.
+
+Rejected: *self-hosted runner on the laptop* (the memory is the problem); *a matrix of stages in
+one run* (a 6-hour job limit per stage is simpler to reason about).

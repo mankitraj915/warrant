@@ -14,7 +14,7 @@ Modes:
   ``tests/test_ni_mutants.py`` (rule in DECISIONS D-056).
 - ``kseed`` (D-058): for every required mutant (every shapes mutant, and the
   grammar's ``GRAMMAR_CATCHES``), run its design ``KSEED`` = (n, k): k seeds
-  ``KSEED_BASE + 1 .. + k``, n examples each, each stopping at its first
+  ``--seed-base`` + 1 .. + k (default ``KSEED_BASE``), n examples each, each stopping at its first
   violation. The mutant is caught if any seed catches it; a mutant no seed
   catches makes the exit code 1. Every seed runs, so the per-seed detection
   share is recorded too.
@@ -162,12 +162,12 @@ def specs(args: argparse.Namespace) -> list[dict[str, Any]]:
                 elif (prop, source, name) in KSEED:  # kseed
                     n, k = KSEED[prop, source, name]
                     for i in range(1, k + 1):
-                        seed_ = KSEED_BASE + i
+                        seed_ = args.seed_base + i
                         out.append({**base, "measurement": "catch", "examples": n, "seed": seed_})
     return out
 
 
-def heldout_specs() -> list[dict[str, Any]]:
+def heldout_specs(seed_base: int) -> list[dict[str, Any]]:
     from tests.heldout_mutants import HELDOUT
 
     out = []
@@ -183,7 +183,7 @@ def heldout_specs() -> list[dict[str, Any]]:
                         "heldout": True,
                         "measurement": "catch",
                         "examples": n,
-                        "seed": KSEED_BASE + i,
+                        "seed": seed_base + i,
                     }
                 )
     return out
@@ -210,6 +210,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--mutant", action="append")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--spec")
+    parser.add_argument("--seed-base", type=int, default=KSEED_BASE)
     args = parser.parse_args(argv)
     if args.mode == "one":
         print(json.dumps(one(json.loads(args.spec))), flush=True)
@@ -242,7 +243,7 @@ def main(argv: list[str]) -> int:
 
     if args.mode == "heldout":
         caught: set[str] = set()
-        for spec in heldout_specs():
+        for spec in heldout_specs(args.seed_base):
             if spec["mutant"] in caught:
                 continue
             row = measured(spec)

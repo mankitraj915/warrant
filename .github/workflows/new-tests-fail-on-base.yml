@@ -1,0 +1,28 @@
+name: new tests fail on base
+
+# A test added to fix a bug must fail on the code before the fix. This job collects
+# the tests the pull request adds, runs them against the base commit (with the PR's
+# versions of the test files), and fails unless every one of them fails there.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  new-tests-fail-on-base:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.29"
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: >
+          uv run --locked python scripts/new_tests_fail_on_base.py
+          --base ${{ github.event.pull_request.base.sha }}
