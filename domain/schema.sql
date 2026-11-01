@@ -74,7 +74,7 @@ CREATE TABLE refunds (
 CREATE TABLE approvals (
     run_id TEXT PRIMARY KEY,
     hash TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('requested', 'consumed'))
+    status TEXT NOT NULL CHECK (status IN ('requested', 'consumed', 'rejected'))
 );
 
 -- Kernel decision log: one row per run, append-only (enforced by triggers).

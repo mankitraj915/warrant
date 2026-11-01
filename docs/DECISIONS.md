@@ -2762,3 +2762,37 @@ for later. The two deterministic tests check the policy rule the property would 
 **Side observation, recorded.** With text-triggered credits on two tickets in one plan, the
 second credit is never admissible: the run's cumulative extraction label mixes both tickets'
 bodies. That is sound. Its cost to multi-ticket plans is unmeasured.
+
+## D-067 Every run that starts is audited, including failures (2026-11-02; Gate 3 finding 7, issue #7)
+
+**Problem.** The audit trail and the run-id lifecycle had holes:
+- An approver that raised left an `approvals` row with status `requested` and no audit row.
+- A retry with the same run id failed with `IntegrityError` instead of `rejected`.
+- `run_task` with a leaked ticket that does not exist raised `ResolutionHalted` outside
+  `run_plan`, with no audit row.
+- The same was true of any exception escaping execution, including `RecordLost` (D-061)
+  after the write-ahead row.
+- Nothing executed in any of these cases, but the module docstring's "every run writes one
+  audit row" was false.
+
+**Decision.** The fix is one handler at the root, not a patch per path.
+- When an exception escapes `_decide_and_execute`:
+  - the unfinished step is rolled back;
+  - a still-`requested` approval is marked `rejected` (the schema allows the new status);
+  - a final audit row with the new outcome `failed` names the exception;
+  - the exception is re-raised, so failure stays loud.
+- A leaked missing ticket is audited as `halted`, like the same halt inside a plan.
+- A run refused by the run lock still writes nothing, because it touched nothing.
+
+**Rejected.**
+- *Treating an approver exception as a denial* (outcome `needs_approval`, no exception). That
+  fails closed, but it hides an approver bug behind a normal-looking outcome. Raising after
+  auditing gives both the record and the signal.
+- *Committing the partial transaction before auditing.* A step interrupted between its write
+  and its commit, for example a ticket closed with no `Executed` entry, would be made
+  durable. The rollback discards exactly the step that did not complete.
+
+**Regression tests** (`tests/test_audit.py`, all three fail on the code before this change):
+- an approver that raises;
+- a leaked missing ticket;
+- `RecordLost` after the write-ahead row.

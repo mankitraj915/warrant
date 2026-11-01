@@ -82,3 +82,68 @@ def test_evaluation_can_fix_the_run_id() -> None:
     r = run_task("T", "x", OraclePlanner(refund_in_full(CASE_TICKET, 7000)), env, run_id="seed-1")
     assert r.run_id == "seed-1"
     assert PlannerInput("x", "").label().trusted
+
+
+# --- Gate 3 review #7: failures outside the documented paths are audited ------------
+
+
+class RaisingApprover:
+    def review(self, request: dict[str, Any], hash_: str) -> Any:
+        raise RuntimeError("approver UI crashed")
+
+
+def test_an_approver_that_raises_is_audited_and_its_approval_rejected() -> None:
+    """The exception still propagates, but the run leaves a final audit row, the
+    approval request is marked rejected, and a retry of the run id is refused cleanly
+    (it used to fail with an IntegrityError on the approvals table)."""
+    env = _env("delivered")  # two eligible orders: the set needs approval
+    env.approver = RaisingApprover()
+    with pytest.raises(RuntimeError, match="approver UI crashed"):
+        run_plan(refund_from_ticket_text(CASE_TICKET), env, run_id="r-x")
+    [row] = [r for r in _audit(env) if r["run_id"] == "r-x"]
+    assert row["phase"] == "final" and row["outcome"] == "failed"
+    assert "RuntimeError" in row["reason"]
+    status = env.db.execute("SELECT status FROM approvals WHERE run_id = 'r-x'").fetchall()
+    assert status == [("rejected",)]
+    retry = run_plan(refund_from_ticket_text(CASE_TICKET), env, run_id="r-x")
+    assert retry.outcome == "rejected"
+    assert env.provider.effects == []  # type: ignore[attr-defined]
+
+
+def test_run_task_with_a_leaked_missing_ticket_is_audited_as_halted() -> None:
+    """The leaked-context configuration read a missing ticket outside run_plan, so the
+    halt escaped with no audit row."""
+    env = _env()
+    result = run_task(
+        "T-x",
+        "resolve",
+        OraclePlanner(refund_in_full(CASE_TICKET, 7000)),
+        env,
+        leak_ticket_bodies=(4999,),
+        run_id="r-leak",
+    )
+    assert result.outcome == "halted"
+    [row] = [r for r in _audit(env) if r["run_id"] == "r-leak"]
+    assert row["outcome"] == "halted" and row["task_id"] == "T-x"
+
+
+class DeletesPendingRow(PaymentMock):
+    def __init__(self, db: sqlite3.Connection) -> None:
+        super().__init__()
+        self.db = db
+
+    def refund(self, idempotency_key: str, order_id: int, amount: int) -> str:
+        self.db.execute("DELETE FROM refunds WHERE idempotency_key = ?", (idempotency_key,))
+        self.db.commit()
+        return super().refund(idempotency_key, order_id, amount)
+
+
+def test_a_kernel_failure_during_execution_gets_a_final_audit_row() -> None:
+    """RecordLost (D-061) is raised from execution, after the write-ahead row; the run
+    must still end with a final row that says it failed."""
+    env = _env()
+    env.provider = DeletesPendingRow(env.db)
+    with pytest.raises(Exception, match="refund"):
+        run_plan(refund_from_ticket_text(CASE_TICKET), env, run_id="r-lost")
+    phases = [(r["phase"], r["outcome"]) for r in _audit(env) if r["run_id"] == "r-lost"]
+    assert phases == [("decided", "executing"), ("final", "failed")]

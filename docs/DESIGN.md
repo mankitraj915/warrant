@@ -450,7 +450,13 @@ untrusted origins of each component, so the components and origins a rule consid
 read from it. The predicate inputs (the trusted rows read) are not logged; the trace shows the
 decision, not a replay of it. Each run writes a `decided` row before its first effect and a
 `final` row with the outcome; recovery of pending refunds writes its own `recover` rows
-(Gate 2 review #5).
+(Gate 2 review #5). A run that an exception escapes still writes its `final` row:
+- the outcome is `failed`, and the reason names the exception;
+- the unfinished step is rolled back, and a pending approval request is marked `rejected`;
+- the exception is re-raised, and the run id is spent;
+- a leaked ticket that does not exist is audited as `halted`, like an in-plan halt.
+(Gate 3 review #7, D-067.) Only a run refused by the run lock writes nothing, because it
+touched nothing (D-061).
 
 Because endorsement is per action, an endorsed value can never become the condition of a
 `filter` that selects a *different* action, and cannot be stored and reused as trusted, except
