@@ -1556,7 +1556,7 @@ the property it was written for. Where a property moved to another test, the row
 | `test_interpreter_labels::test_amount_selected_by_tainted_id_is_tainted` | `amount == {body, @row}` | `amount == {body}` | Equal: still checks selection by a tainted id. |
 | `test_interpreter_labels::test_read_of_an_operator_named_ticket_is_trusted` (was `test_ticket_read_taints_only_with_the_tickets_existence`) | a trusted ticket read taints `order_id`, `amount` and `pc` with `@row` only | those labels are empty | **Weaker on its own.** It no longer guards against losing the existence taint; it now guards against spurious taint. The existence guard moved to the halt: `test_point_read_existence.py` (3 configurations), `test_ticket_existence_can_only_suppress_a_run` and the mutant. |
 | `test_gate1_regressions::test_ticket_existence_can_only_suppress_a_run` (was `test_ticket_existence_cannot_select_a_trusted_refund`) | NI-1 holds between the worlds with and without ticket 4001; the run with it does not execute; `@row` in `pc` | the run without 4001 halts with no actions or effects; NI-3 holds; the run with 4001 executes; `@row` not in `pc` | **Weaker property, by design.** Before, existence could not even suppress a run (NI-1). Now it may suppress a whole run but never select what executes (NI-3). This is the trade the owner's decision 6 accepted, under the adoption conditions above. |
-| `test_gate2_regressions::test_goodwill_credits_are_bounded_per_customer_not_only_per_ticket` | four credits via plain ticket reads: executed, then needs approval three times | the same four outcomes, with each credit triggered by its ticket's text ("late #7000") | Equal: same assertion. The input changed so the credits still go through the rule, which a plain read no longer does. |
+| `test_gate2_regressions::test_goodwill_credits_are_bounded_per_customer_not_only_per_ticket` | four credits via plain ticket reads: executed, then needs approval three times | the same four outcomes, with each credit triggered by its ticket's text ("late #7000") | ~~Equal: same assertion.~~ **Weaker, not equal** (corrected at Gate 3, review #2; D-062). The input changed so the credits still go through the rule, which a plain read no longer does. The original plain-read probe then executed four credits and ran nowhere. It is restored as `test_probe_f_original_form_plain_read_credits_are_bounded_per_customer`, with the bound moved into the credit policy (P6). |
 | `test_rule_goodwill`: helper `credit_ticket_customer` and the `_world` default body (used by `test_admits_the_standard_credit_to_the_tickets_customer`, `test_rejects_any_other_amount` and `test_once_per_ticket_across_runs`) | credits via a plain ticket read; body "My parcel was late." | credits triggered by the body naming an order (`credit_if_order_mentioned`); body "My parcel #7000 was late." | Equal: the assertions are unchanged and the rule is still the decision maker. The new plain-read behaviour is pinned by the new `test_a_credit_with_no_text_involved_is_trusted_and_skips_the_rule`, which I checked fails with the Phase 1–2 setting. |
 | `test_evals::test_simulated_approver_approves_exactly_the_intended_set` | on T20 (two eligible orders), the approver approves exactly the intended set | the same, on T37 (the text names two orders) | Equal: same assertions. T20 no longer asks for approval, so it could not exercise the approver. |
 | `test_ni_mutants`: mutant "point ticket read drops existence origin", now "point read of a missing trusted ticket does not halt" | NI catches the narrowing without the halt | NI catches the narrowing without the halt | Equal: the same kernel configuration (`POINT_READ_EXISTENCE = False`, no halt). |
@@ -2566,3 +2566,55 @@ before this change:
 - a refused run writes no audit row;
 - a second process holding the lock refuses a run until it exits;
 - a lost record raises and is restored.
+
+## D-062 Per-customer credit bound in the credit policy (2026-11-02; Gate 3 finding 2, issue #2)
+
+**Problem.**
+- Since D-054, a credit to an operator-named ticket's customer that involves no ticket text is
+  fully trusted. The policy ALLOWs it without consulting `ticket_goodwill_credit`, and the
+  per-customer bound (Gate 2 #6) lived only in that rule.
+- Gate 2 probe F in its original form (plain ticket reads, four tickets of one customer)
+  executed four credits.
+- The D-054 table called the probe-F test "Equal". Its input had been changed to
+  text-triggered credits, so the original probe ran nowhere.
+
+**Decision.**
+- New policy rule P6 in `kernel/policy.py`, applied to every credit the policy would otherwise
+  ALLOW, whether its components are trusted or the goodwill rule admitted it.
+- A credit that would be the customer's second needs approval. That is the case if the
+  customer already has a recorded credit, or if the action set holds another credit to them.
+- The per-ticket bound was already in the credit policy (P3 BLOCK: one credit per ticket,
+  recorded or in the set) and is unchanged.
+- The rule keeps its own per-customer checks, so its logged reason stays specific.
+- Row 7 of the D-054 table is corrected in place: weaker, not equal.
+- The original probe F is restored as a test.
+
+**Deviation from the response table.**
+- The Gate 3 response said "P3 checks", which BLOCK whatever the labels. P6 asks for approval
+  instead.
+- A BLOCK would leave no route at all for a legitimate second credit, for example a customer
+  with two genuine complaints months apart. SPEC states no "one credit per customer, ever"
+  business rule.
+- Gate 2 #6 itself only ever moved the second credit to approval: the rule declined, and the
+  policy asked for approval.
+- Compared with the code before this change, every verdict P6 touches moves from ALLOW to
+  NEEDS_APPROVAL, so nothing is weakened.
+
+**Rejected.**
+- *P3 BLOCK* (above).
+- *Recording probe F only as a cost of D-054.* The review offered this; it leaves an
+  attacker-controlled number of automatic credits whenever the operator's workflow is
+  "resolve each new ticket".
+- *Routing trusted credits through the rule again.* That re-couples the rule to trusted
+  actions and makes "whether a decision is logged" depend on more than labels.
+
+**Effect on the evaluations.** No world seeds a credit (`domain/seed.py` `materialize` writes
+none). P6 can therefore change an evaluation outcome only where one run holds two credits to
+one customer, or several runs share one database. Stage d reruns both evaluations; the
+change has not been measured until then.
+
+**Regression tests** (both fail on the code before this change):
+- `test_probe_f_original_form_plain_read_credits_are_bounded_per_customer`: executed, then
+  needs approval three times, and one credit in total. On base, four executions.
+- `test_two_trusted_credits_to_one_customer_in_one_set_need_approval`: two operator-stated
+  credits to one customer in one set. On base, both are ALLOWed.
