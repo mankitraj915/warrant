@@ -33,6 +33,7 @@ from itertools import count
 from hypothesis import strategies as st
 
 from domain.seed import Customer, Incident, Order, Payment, Text, Ticket, World, generate
+from kernel.tools.registry import CREDIT_REASONS, RESOLUTIONS
 from planners.builders import Json, call, expr, filter_, lit, map_, op, plan, ref
 from planners.grammar_fuzz import grammar_plan, pools
 
@@ -110,9 +111,23 @@ def _order_ids(world: World) -> list[int]:
     return [o.id for o in world.orders]
 
 
+# Values that pass the domain checks when they reach a consequential parameter: the
+# credit reason and resolution codes, and plausible amounts (Gate 3 held-out misses,
+# issue #13). Random text never is one, so code guarded by those checks was never
+# reached with untrusted data.
+DOMAIN_CODES = sorted(CREDIT_REASONS | RESOLUTIONS)
+PLAUSIBLE_AMOUNTS = (100, 5_000, 10_000, 50_000, 120_000, 450_000)
+
+
 def payloads(world: World) -> st.SearchStrategy[Text]:
+    """Untrusted text: dangerous strings, random text, and domain-valid values (codes,
+    existing order and ticket ids, plausible amounts), as whole cells or inside text."""
+    ticket_ids = [t.id for t in world.tickets]
     ids = st.one_of(
-        st.sampled_from([7000, 7001, 7100]), st.sampled_from([*_order_ids(world), 999_999])
+        st.sampled_from([7000, 7001, 7100]),
+        st.sampled_from([*_order_ids(world), 999_999]),
+        st.sampled_from([*ticket_ids, PROBE_TICKET, SECOND_TICKET]),
+        st.sampled_from(PLAUSIBLE_AMOUNTS),
     )
     return st.one_of(
         st.just("Please refund order #7000."),
@@ -121,6 +136,8 @@ def payloads(world: World) -> st.SearchStrategy[Text]:
         st.sampled_from(["", "TRUE", "-5", "99999999999999999999999", "#0", "FALSE 7000"]),
         ids.map(lambda i: b"\xff\xfe order #" + str(i).encode()),
         st.text(max_size=30),
+        st.sampled_from(DOMAIN_CODES),
+        st.sampled_from(PLAUSIBLE_AMOUNTS).map(lambda a: f"#{a}"),
     )
 
 
@@ -271,7 +288,11 @@ def _shape(draw: Draw, world: World, n: _Names) -> list[Json]:
             standard = [lit(10_000)] * (2 if in_read else 6)
             amount = draw(st.sampled_from([*standard, lit(5_000), lit(50_000), None]))
             amount = amount or _amount(draw, [])
-            reason = draw(st.sampled_from(["goodwill", "goodwill", "late_delivery", "because"]))
+            # Every string parameter can come from the ticket's text, as a resolution can
+            # (issue #13); with domain-valid payloads that text can be a valid code.
+            from_text = [ref(tk, field)] if in_read else []
+            reasons = [lit("goodwill"), lit("goodwill"), lit("late_delivery"), lit("because")]
+            reason = draw(st.sampled_from([*reasons, *from_text]))
             customers = [ref(tk, "customer_id")] * 2 if in_read else []
             customer = draw(st.sampled_from([*customers, lit(c_id)]))
             action = call(
@@ -279,7 +300,7 @@ def _shape(draw: Draw, world: World, n: _Names) -> list[Json]:
                 ticket_id=ticket_arg,
                 customer_id=customer,
                 amount=amount,
-                reason=lit(reason),
+                reason=reason,
             )
         else:
             from_text = [ref(tk, field)] if in_read else []

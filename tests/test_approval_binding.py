@@ -148,8 +148,24 @@ def _as_effects(actions: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
     return by_tool["issue_refund"] + by_tool["issue_credit"] + sorted(closed)
 
 
-def _ni5(plan: Json, world: World) -> RunResult:
-    approver = ApproveAll()
+class Adversarial(ApproveAll):
+    """Approves something other than what it is shown (issue #13): a stale hash (the
+    request without its last action) or the right hash for another run."""
+
+    def __init__(self, mode: str) -> None:
+        super().__init__()
+        self.mode = mode
+
+    def review(self, request: dict[str, Any], hash_: str) -> Approval | None:
+        self.seen.append((request, hash_))
+        if self.mode == "other run":
+            return Approval(f"{request['run_id']}-other", hash_)
+        stale = digest({**request, "actions": request["actions"][:-1]})
+        return Approval(request["run_id"], stale if stale != hash_ else "0" * 64)
+
+
+def _ni5(plan: Json, world: World, mode: str = "exact") -> RunResult:
+    approver = ApproveAll() if mode == "exact" else Adversarial(mode)
     env = _env(world, approver)
     r = run_plan(plan, env, run_id="ni5")
     provider = env.provider
@@ -158,6 +174,10 @@ def _ni5(plan: Json, world: World) -> RunResult:
     if not approver.seen:
         return r
     request, hash_ = approver.seen[0]
+    if mode != "exact":  # an approval of anything else must execute nothing
+        if done:
+            raise NIViolation(f"NI-5 executed {done} under an approval for a {mode}")
+        return r
     approved = _as_effects(request["actions"])
     if done and (done != approved or digest(request) != hash_):
         raise NIViolation(f"NI-5 executed {done} but approved {approved}")
@@ -168,9 +188,10 @@ def ni5_property(data: Any, source: str = "shapes") -> None:
     world = data.draw(worlds(), label="world")
     plan = data.draw(plans(world, source), label="plan")
     coverage_events(source, plan)
-    r = _ni5(plan, data.draw(mutated(world), label="E"))
+    mode = data.draw(st.sampled_from(["exact", "exact", "exact", "stale hash", "other run"]))
+    r = _ni5(plan, data.draw(mutated(world), label="E"), mode)
     event(f"halted={r.outcome == 'halted'}")
-    event(f"approval requested={r.approval_request is not None}")
+    event(f"approval requested={r.approval_request is not None} ({mode})")
 
 
 @given(st.data())

@@ -198,31 +198,37 @@ GRAMMAR_CATCHES: dict[str, tuple[str, ...]] = {
     "multirun": (),
     "NI-5": (),
 }
-# ``check`` replays each mutant's earliest measured detection: the rate run's settings
-# (WITNESS_EXAMPLES) at the seed below, which stops at its first violation. Generation is
+# ``check`` replays one measured detection per mutant: the rate run's settings
+# (WITNESS_EXAMPLES) at the seed below, which stops at its first violation. The comments
+# give the property call that detects it under the issue #13 generators (re-measured
+# 2026-11-02 with ``mutant_rates.py one``; D-070). Generation is
 # pinned, so this is exact. It is a regression check that the harness still reaches the
 # mutant, not a detection-rate claim; the budgets above are that claim (D-056).
 WITNESS_EXAMPLES = 1000
 WITNESSES: dict[tuple[str, str, str], int] = {
-    ("NI", "grammar", "extractor output labelled trusted"): 202616003,  # first at 86
-    ("NI", "grammar", "map body pc ignores list structure"): 202616003,  # first at 86
-    ("NI", "grammar", "point read of a missing trusted ticket does not halt"): 202616002,  # 91
-    ("NI", "grammar", "policy ignores pc"): 202616005,  # first at 122
-    ("NI", "shapes", "at ignores index label"): 202616001,  # first at 7
-    ("NI", "shapes", "extraction ignores control"): 202616003,  # first at 359
-    ("NI", "shapes", "extractor output labelled trusted"): 202616001,  # first at 3
-    ("NI", "shapes", "filter ignores predicate labels"): 202616001,  # first at 3
-    ("NI", "shapes", "goodwill rule ignores amount"): 202616004,  # first at 168
-    ("NI", "shapes", "goodwill rule ignores origin set"): 202616004,  # first at 265
-    ("NI", "shapes", "map body pc ignores list structure"): 202616004,  # first at 5
-    ("NI", "shapes", "ownership rule drops uniqueness"): 202616001,  # first at 3
-    ("NI", "shapes", "ownership rule ignores origin set"): 202616003,  # first at 107
-    ("NI", "shapes", "point read of a missing trusted ticket does not halt"): 202616004,  # 3
-    ("NI", "shapes", "policy ignores pc"): 202616002,  # first at 60
-    ("NI-5", "shapes", "re-check treats a relaxed verdict as stricter"): 202616002,  # 253
+    ("NI", "grammar", "extractor output labelled trusted"): 202616003,  # call 562
+    ("NI", "grammar", "map body pc ignores list structure"): 202616003,  # call 562
+    # call 270
+    ("NI", "grammar", "point read of a missing trusted ticket does not halt"): 202616002,
+    ("NI", "grammar", "policy ignores pc"): 202616005,  # call 700
+    ("NI", "shapes", "at ignores index label"): 202616001,  # call 210
+    ("NI", "shapes", "extraction ignores control"): 202616003,  # call 616
+    ("NI", "shapes", "extractor output labelled trusted"): 202616001,  # call 4
+    ("NI", "shapes", "filter ignores predicate labels"): 202616001,  # call 4
+    ("NI", "shapes", "goodwill rule ignores amount"): 202616004,  # call 547
+    ("NI", "shapes", "goodwill rule ignores origin set"): 202616004,  # call 497
+    ("NI", "shapes", "map body pc ignores list structure"): 202616004,  # call 80
+    ("NI", "shapes", "ownership rule drops uniqueness"): 202616001,  # call 4
+    ("NI", "shapes", "ownership rule ignores origin set"): 202616003,  # call 332
+    ("NI", "shapes", "point read of a missing trusted ticket does not halt"): 202616004,  # call 4
+    ("NI", "shapes", "policy ignores pc"): 202616002,  # call 50
+    # Re-derived for the issue #13 generators: 202616002 no longer catches within 1,000.
+    ("NI-5", "shapes", "re-check treats a relaxed verdict as stricter"): 202616001,  # call 589
+    # call 161
     ("multirun", "shapes", "execution writes no record before the provider call"): 202616004,
-    ("multirun", "shapes", "goodwill rule drops the per-customer bound"): 202616005,  # 42
-    ("multirun", "shapes", "ownership rule drops never-refunded order"): 202616002,  # 3
+    ("multirun", "shapes", "goodwill rule drops the per-customer bound"): 202616005,  # call 155
+    ("multirun", "shapes", "ownership rule drops never-refunded order"): 202616002,  # call 270
+    # call 1033
     ("multirun", "shapes", "ownership rule drops once-per-ticket across runs"): 202616004,
 }
 

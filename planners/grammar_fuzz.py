@@ -15,9 +15,12 @@ on their own they caught almost no labelling mutant (D-053). The generator
 therefore tracks "hot" names, bound to data derived from untrusted text
 (extracted ids, and anything computed from them or under iteration over them):
 
-- half the plans open with a tainted source: a read (``read_ticket`` or
+- two plans in five open with a tainted source: a read (``read_ticket`` or
   ``query_orders``) and a ``map`` over its records that extracts order ids from
   one of their text fields, followed by random steps that can use them;
+- one in five opens with a membership source: the same read mapped to one text
+  field, a list with a trusted structure and untrusted elements, for ``contains``
+  and ``filter`` to test against (issue #13);
 - ``map``, ``filter``, ``at``, ``len`` and ``contains`` prefer hot lists, and
   calls inside iteration over hot data are mostly consequential.
 
@@ -194,6 +197,23 @@ class _Generator:
             return [first, expr(e)]
         return [first, expr(e, self.bind(scope, TList(last), hot=True))]
 
+    def membership_opening(self, scope: Scope) -> list[Json]:
+        """Read records, then map them to one of their text fields: a list whose structure
+        is trusted but whose elements are untrusted text. It is marked hot, so ``contains``
+        and ``filter`` prefer it (issue #13: membership in such a list)."""
+        spec = TOOLS[self.choose(["read_ticket", "query_orders"])]
+        args = {p: self.arg(scope, p, t, coherent=True) for p, t in spec.params}
+        records = self.bind(scope, spec.result, always=True)
+        assert records is not None and isinstance(spec.result, TList)
+        record = spec.result.item
+        assert isinstance(record, TRec)
+        texts = [f for f, ft in RECORDS[record.name].items() if ft == STR]
+        binder = self.name()
+        self.steps += 2
+        values = map_(ref(records), binder, expr(ref(binder, self.choose(texts))))
+        first = call(spec.name, records, **args)
+        return [first, expr(values, self.bind(scope, TList(STR), always=True, hot=True))]
+
     def map_step(self, scope: Scope, depth: int, lists: list[tuple[Json, TList]]) -> Any:
         over, t = self.over(scope, lists)
         binder = self.name()
@@ -332,7 +352,15 @@ def pools(
         "Money": [0, 1, 100, 10_000, 120_000, 450_000, 10**15],
         "Int": [-1, 0, 1, 2],
         "Bool": [True, False],
-        "Str": ["", "delivered", "open", "Please refund order #7000.", "7001 7000", "TRUE"],
+        "Str": [
+            "",
+            "delivered",
+            "open",
+            "Please refund order #7000.",
+            "7001 7000",
+            "TRUE",
+            *sorted(CREDIT_REASONS | RESOLUTIONS),  # values untrusted text may now hold (#13)
+        ],
     }
 
 
@@ -340,7 +368,13 @@ def grammar_plan(draw: Draw, literal_pools: dict[str, Sequence[Any]]) -> Json:
     """One random well-typed plan of 1 to 6 top-level steps."""
     gen = _Generator(draw, literal_pools)
     scope: Scope = {}
-    opening = gen.tainted_opening(scope) if draw(st.booleans()) else []
+    kind = draw(st.sampled_from(["tainted", "tainted", "membership", "none", "none"]))
+    if kind == "tainted":
+        opening = gen.tainted_opening(scope)
+    elif kind == "membership":
+        opening = gen.membership_opening(scope)
+    else:
+        opening = []
     steps, _ = gen.block(scope, 0, draw(st.integers(1, 6)))
     return plan(*opening, *steps)
 

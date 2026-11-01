@@ -124,4 +124,5 @@ GitHub Actions, never in session. Plan and progress (tick as done):
 7. [ ] Step 6: final skeptical review, fixes, fresh-clone reproduction, tag v1.0 and release,
    hand-off report.
 
-Never run the fuzz or the owner-run stages inside a session. `check` takes about 1 min.
+Never run the fuzz or the owner-run stages inside a session. `check` takes about 2 min
+(witness replays under the issue #13 generators, D-070).
