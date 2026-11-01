@@ -12,7 +12,29 @@ mutant when ``WARRANT_MUTANT`` is ``<name>`` (or ``*``: each marked test's own);
 
 from typing import Any
 
+import kernel.declassify
 import kernel.execution
+from kernel.labels import cell_origin
+from kernel.tools.database import EXISTS, Database
+from kernel.values import ListV, Record, Scalar
+
+_read_ticket = Database.read_ticket
+_case_ticket_origins = kernel.declassify._case_ticket_origins
+
+
+def _untrusted_read_drops_row(self: Database, ticket_id: Scalar) -> ListV:
+    """Gate 3 review #4: a read by an untrusted id omits ``tickets[T].@row``."""
+    result = _read_ticket(self, ticket_id)
+    if ticket_id.label.trusted:
+        return result
+    items = tuple(Record(r.fields, ticket_id.label) for r in result.items if isinstance(r, Record))
+    return ListV(items, ticket_id.label)
+
+
+def _origins_without_row(ticket: int) -> set[str]:
+    """Gate 3 review #4: the rules' origin set for ticket T omits ``tickets[T].@row``."""
+    return _case_ticket_origins(ticket) - {cell_origin("tickets", ticket, EXISTS)}
+
 
 DETERMINISTIC_MUTANTS: dict[str, tuple[Any, str, Any]] = {
     # Gate 3 review #3: the between-effects re-check never stops the run.
@@ -20,5 +42,12 @@ DETERMINISTIC_MUTANTS: dict[str, tuple[Any, str, Any]] = {
         kernel.execution,
         "_STRICTNESS",
         {"ALLOW": 0, "NEEDS_APPROVAL": 0, "BLOCK": 0},
+    ),
+    # Gate 3 review #4: untrusted-id reads and the rules' existence origin.
+    "untrusted-id ticket read drops @row": (Database, "read_ticket", _untrusted_read_drops_row),
+    "rule origin set omits @row": (
+        kernel.declassify,
+        "_case_ticket_origins",
+        _origins_without_row,
     ),
 }
