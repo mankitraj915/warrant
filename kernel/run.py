@@ -10,7 +10,8 @@ is ALLOWed or the whole set is approved. NEEDS_APPROVAL produces an approval
 request (the canonical set and its hash) for ``env.approver``; an approval is
 honoured only for this run, for the hash the kernel recomputes, and once
 (DESIGN §7, NI-5). The default approver denies. Run ids are single-use. Every
-run writes one append-only audit row (``audit`` table) explaining its decision.
+run writes one append-only audit row (``audit`` table) explaining its decision,
+including a run an exception escapes (outcome ``failed``; the exception is re-raised).
 One run at a time per database: both entry points hold the run lock from before
 ``recover`` until the final audit row (``runlock``, DESIGN §10).
 """
@@ -47,6 +48,7 @@ Outcome = Literal[
     "halted",  # resolution stopped: an operator-named ticket does not exist (D-054)
     "partial",
     "indeterminate",
+    "failed",  # an exception escaped the run; audited, then re-raised (Gate 3 #7)
     "executing",  # only in the write-ahead "decided" audit row
 ]
 
@@ -163,9 +165,37 @@ def _run_plan(
         result = RunResult(run_id, "rejected", "run_id already used; run ids are single-use")
     else:
         audit = partial(_audit, raw_plan=raw_plan, task_id=task_id)
-        result = _decide_and_execute(raw_plan, env, run_id, plan_label, audit, planner_input_hash)
+        try:
+            result = _decide_and_execute(
+                raw_plan, env, run_id, plan_label, audit, planner_input_hash
+            )
+        except Exception as exc:
+            _audit_failure(env.db, run_id, exc, raw_plan, task_id, plan_label, planner_input_hash)
+            raise
     result = replace(result, planner_input_hash=planner_input_hash)
     return _audit(env.db, result, raw_plan, task_id)
+
+
+def _audit_failure(
+    db: sqlite3.Connection,
+    run_id: str,
+    exc: Exception,
+    raw_plan: Any,
+    task_id: str | None,
+    plan_label: Label,
+    planner_input_hash: str | None,
+) -> None:
+    """An exception escaped the run (an approver that raises, ``RecordLost``, a bug):
+    discard the unfinished step, reject a pending approval request, and write the
+    run's final audit row, so every run is audited and its id is spent (Gate 3 #7)."""
+    db.rollback()
+    db.execute(
+        "UPDATE approvals SET status = 'rejected' WHERE run_id = ? AND status = 'requested'",
+        (run_id,),
+    )
+    reason = f"{type(exc).__name__}: {exc}"
+    failed = RunResult(run_id, "failed", reason, plan_label=plan_label)
+    _audit(db, replace(failed, planner_input_hash=planner_input_hash), raw_plan, task_id)
 
 
 def _decide_and_execute(
@@ -305,7 +335,12 @@ def _run_task(
     env.db.text_factory = lossless_text
     context: list[tuple[str, Label]] = []
     for ticket_id in leak_ticket_bodies:
-        for record in Database(env.db).read_ticket(Scalar(ticket_id, OPERATOR)).items:
+        try:
+            read = Database(env.db).read_ticket(Scalar(ticket_id, OPERATOR))
+        except ResolutionHalted as exc:  # audited like an in-plan halt (Gate 3 #7)
+            halted = RunResult(run_id, "halted", str(exc))
+            return _audit(env.db, halted, None, task_id)
+        for record in read.items:
             assert isinstance(record, Record)
             body = record.field("body")
             assert isinstance(body, Scalar)
