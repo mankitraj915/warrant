@@ -1266,7 +1266,7 @@ a pass.
 50415cb: `git diff --stat 50415cb 0905584` shows only CLAUDE.md, DECISIONS.md and
 `scripts/fuzz_chunks.py`.
 - **Where it runs:** the command runs in a detached worktree at that commit,
-  `C:\Users\manki\warrant-fuzz-gate2` (outside OneDrive), so Phase 3 edits in the main tree
+  `<worktree-gate2>` (outside the synced folder), so Phase 3 edits in the main tree
   cannot change what is fuzzed.
 - **Log:** it appends to the main tree's `results/fuzz_chunks.jsonl`.
 - **What each row records:** the commit, so the log shows which code each chunk ran, and the
@@ -1277,7 +1277,7 @@ a pass.
 The command works in cmd and PowerShell:
 
 ```
-uv run --offline --locked --directory C:\Users\manki\warrant-fuzz-gate2 python scripts/tasks.py fuzz-chunks --resume --chunks 20 --examples 1000 --log C:\Users\manki\OneDrive\Desktop\warrant\results\fuzz_chunks.jsonl --test tests/test_noninterference.py::test_noninterference --base-seed 202610800 --test tests/test_noninterference.py::test_noninterference_multirun --base-seed 202610900 --test tests/test_approval_binding.py::test_ni5_executed_set_is_the_approved_set --base-seed 202611000
+uv run --offline --locked --directory <worktree-gate2> python scripts/tasks.py fuzz-chunks --resume --chunks 20 --examples 1000 --log <repo>\results\fuzz_chunks.jsonl --test tests/test_noninterference.py::test_noninterference --base-seed 202610800 --test tests/test_noninterference.py::test_noninterference_multirun --base-seed 202610900 --test tests/test_approval_binding.py::test_ni5_executed_set_is_the_approved_set --base-seed 202611000
 ```
 
 Before handing it over, I checked that the worktree runs with `--offline` from another
@@ -1639,12 +1639,12 @@ Steps:
 6. **`sweep-dev`, `sweep-holdout`.**
 
 **Command** (cmd or PowerShell; run after the Gate 2 fuzz, with Claude Code closed). It runs
-in a detached worktree at 6e27f60, `C:\Users\manki\warrant-phase3`, outside OneDrive. Later
+in a detached worktree at 6e27f60, `<worktree-phase3>`, outside the synced folder. Later
 commits on `phase3-wip` change only documentation. It writes to the main tree's
 `results/phase3/`, and rerunning the same command after an interruption resumes it:
 
 ```
-uv run --offline --locked --directory C:\Users\manki\warrant-phase3 python scripts/tasks.py phase3-run --resume --out C:\Users\manki\OneDrive\Desktop\warrant\results\phase3
+uv run --offline --locked --directory <worktree-phase3> python scripts/tasks.py phase3-run --resume --out <repo>\results\phase3
 ```
 
 I checked it from the worktree with every step pre-marked as passed (it parses, sees a clean tree
@@ -2463,3 +2463,20 @@ before it:
 
 These three stay in RESULTS as misses. Post-fix results are reported separately; the three no
 longer count as held out once the generators change.
+
+## D-059 History scan before publishing (2026-11-02)
+
+Scope: every commit on every branch (43 commits), content and messages (`git log --all -p`).
+- **Secrets:** none. No tokens (`gho_`, `ghp_`, `github_pat`), no cloud keys (`AKIA`, `sk-`), no
+  private keys, no passwords. The `sk-` pattern matched only words such as "task-specific".
+- **Personal data:** only the owner's commit identity (author name and e-mail, 43 commits). No
+  other names or addresses.
+- **Local paths:** 10 lines in DECISIONS and CLAUDE.md (worktree commands) contain absolute
+  Windows paths with the local user name. No temp-folder paths.
+- **Session-local references:** some DECISIONS entries cite diagnostic scripts by their session
+  scratchpad name; those scripts are not in the repository.
+
+**Decision: no history rewrite.** Nothing secret is exposed, and the user name is a prefix of the
+public account name. The current tree replaces the paths with `<repo>` and `<worktree-…>`
+placeholders. History keeps them. The owner can still choose a rewrite before making the
+repository public; that needs the owner's yes (delegation limit a).
