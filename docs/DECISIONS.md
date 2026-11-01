@@ -2662,3 +2662,35 @@ change has not been measured until then.
 - *An extension-point flag in `kernel/execution.py`* (like `PENDING_FIRST`). The table
   `_STRICTNESS` is already the natural mutation point, and a new flag would add kernel code
   only for tests.
+
+## D-064 The existence origin is asserted again (2026-11-02; Gate 3 finding 4, issue #4)
+
+**Problem.** Since D-054, every `read_ticket` in the fuzz shapes uses a trusted id. Each such
+read either halts, which skips NI-1 for the pair, or is fully trusted. As a result:
+- The untrusted-id branch, which joins `tickets[T].@row` into the label, was asserted by no
+  test. The reviewer's mutant that drops it was not caught at 3 seeds × 1,500 examples.
+- `test_case_ticket_existence_is_endorsable_by_the_rule` kept its name, but its run no
+  longer carried `@row`.
+
+**Decision.**
+- Two deterministic mutants (D-063): "untrusted-id ticket read drops @row" and "rule origin
+  set omits @row", the latter removing `@row` from Ω_T for both rules.
+- `tests/test_existence_origin.py`:
+  - the label of an untrusted-id read, for an existing and a missing ticket;
+  - the goodwill rule admitting a credit whose customer and pc depend on T's existence.
+- The misnamed test is fixed in place, not renamed. It now calls the ownership rule on an
+  action whose order and amount depend on T's existence. Its old end-to-end scenario is the
+  same as `test_rule_ownership.py::test_admits_the_customers_only_eligible_order`, so no
+  coverage is lost. A rename would also have looked like a new test passing on base.
+- All four tests fail under their mutants.
+
+**Not done here.**
+- The shapes still generate no untrusted-id ticket reads, so NI-1 still never compares a
+  pair that differs in an untrusted id's existence.
+- The `exists` control of `_lit_extract` stays dead for NI-1 (D-056).
+- Generating untrusted ticket ids, taken from ticket text, is part of the generator-coverage
+  class (issue #13). DESIGN §9.4 lists the gap (issue #9).
+
+**Rejected.** *An end-to-end plan that re-reads the case ticket through an id found in its own
+text.* It would reach `@row` without a direct rule call, but no operator writes that plan. A
+direct call states the property (Ω_T includes `@row`) without a contrived scenario.

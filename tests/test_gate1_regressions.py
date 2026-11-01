@@ -6,12 +6,19 @@ where it failed, before the fix it guards.
 
 from typing import Any
 
+import pytest
+
 from domain.payment_mock import PaymentMock, ProviderTimeout
 from domain.seed import Ticket as TicketRow
 from domain.seed import World, materialize
-from kernel.labels import cell_origin
-from kernel.run import Environment, RunResult, run_plan
+from kernel.declassify import ticket_order_ownership
+from kernel.interpreter import ResolvedAction
+from kernel.labels import Label, cell_origin
+from kernel.policy import components
+from kernel.run import OPERATOR, Environment, RunResult, run_plan
+from kernel.tools.database import EXISTS, TrustedReader
 from kernel.tools.registry import TOOLS
+from kernel.values import Scalar
 from planners.builders import call, expr, lit, map_, op, plan, ref, refund_from_ticket_text
 from planners.fuzz import CASE_CUSTOMER, CASE_TICKET, OTHER_CUSTOMER, _case_world, raw_extractor
 from planners.oracle import refund_amount, refund_in_full
@@ -63,14 +70,29 @@ def test_ticket_existence_can_only_suppress_a_run() -> None:
     assert cell_origin("tickets", 4001, "@row") not in r2.actions[0].pc.untrusted
 
 
+@pytest.mark.harness_gap("rule origin set omits @row")
 def test_case_ticket_existence_is_endorsable_by_the_rule() -> None:
-    """The existence origin of the case ticket itself is inside the rule's origin set."""
-    world = _case_world(1, "in_transit").replace_text(
-        "tickets", CASE_TICKET, "body", "Refund #7000"
+    """The existence origin of the case ticket itself is inside the rule's origin set.
+
+    Until Gate 3 this ran a text-triggered refund end to end. Since D-054 that run no
+    longer carries ``tickets[T].@row`` (a trusted-id read is not labelled with it), so
+    the test kept its name but tested something else (Gate 3 review #4); that scenario
+    is ``test_rule_ownership.py::test_admits_the_customers_only_eligible_order``. It now
+    calls the rule on an action whose order and amount depend on T's existence."""
+    reader = TrustedReader(materialize(_case_world(1, "in_transit")))
+    row = Label.untrusted_cell("tickets", CASE_TICKET, EXISTS)
+    action = ResolvedAction(
+        (0,),
+        "issue_refund",
+        {
+            "ticket_id": Scalar(CASE_TICKET, OPERATOR),
+            "order_id": Scalar(7000, row),
+            "amount": Scalar(120_000, row),
+        },
+        row,
     )
-    r, provider, _ = run_world(refund_from_ticket_text(CASE_TICKET), world)
-    assert r.outcome == "executed" and [v.rule for v in r.verdicts] == ["ticket_order_ownership"]
-    assert _paid(provider, 7000) == 120_000
+    decision = ticket_order_ownership(action, components(action), [action], reader)
+    assert decision.admitted, decision.reason
 
 
 # Finding 2: a provider failure must not lose the refund record.
