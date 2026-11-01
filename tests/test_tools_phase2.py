@@ -12,6 +12,8 @@ import json
 import unicodedata
 from typing import Any
 
+import pytest
+
 from domain.payment_mock import PaymentMock
 from domain.seed import Incident, World, generate, materialize
 from evals.canary import CANARY, scan
@@ -144,6 +146,7 @@ def test_order_stats_suppresses_small_groups_and_is_operator_only() -> None:
     assert r.answer_sinks == ["operator"]
 
 
+@pytest.mark.harness_gap("sink check removed")
 def test_aggregates_cannot_parameterize_a_customer_facing_action() -> None:
     p = plan(
         call("order_stats", "s"),
@@ -153,6 +156,19 @@ def test_aggregates_cannot_parameterize_a_customer_facing_action() -> None:
     r, _ = _run(p, generate(5, n_customers=12).extend(**_world_rows()))
     assert r.outcome == "blocked"
     assert any("sink" in v.reason for v in r.verdicts)
+
+
+@pytest.mark.harness_gap("sink check removed")
+def test_aggregates_cannot_select_a_customer_facing_action() -> None:
+    """P5 covers the pc too: a credit whose every argument is an operator literal, but
+    which runs once per aggregate row, is BLOCKed (Gate 3 review #5)."""
+    p = plan(
+        call("order_stats", "s"),
+        expr(map_(ref("s"), "row", _credit(lit(10_000)))),
+    )
+    r, _ = _run(p, generate(5, n_customers=12).extend(**_world_rows()))
+    assert r.actions and r.outcome == "blocked"
+    assert all(v.kind == "BLOCK" and v.reason.startswith("pc may flow only") for v in r.verdicts)
 
 
 def _world_rows() -> dict[str, Any]:

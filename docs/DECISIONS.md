@@ -2694,3 +2694,28 @@ read either halts, which skips NI-1 for the pair, or is fully trusted. As a resu
 **Rejected.** *An end-to-end plan that re-reads the case ticket through an id found in its own
 text.* It would reach `@row` without a direct rule call, but no operator writes that plan. A
 direct call states the property (Ω_T includes `@row`) without a contrived scenario.
+
+## D-065 P5 is covered by deterministic tests, not by NI (2026-11-02; Gate 3 finding 5, issue #5)
+
+**Problem.**
+- With `_sink_block_reason` removed, no NI property fails. The reviewer's run was not caught
+  at 3 seeds × 1,500 examples.
+- Aggregates carry `U = ∅`, so NI-1 and NI-3 treat them as trusted and identical in both
+  worlds.
+- DESIGN §9.4 listed the `order_stats` shapes as if they were NI coverage of P5.
+
+**Decision.** Accepted as scope: the NI properties are the integrity invariant.
+- DESIGN §9.4 now says the `order_stats` shapes exercise labels only, and that P5 is covered
+  by deterministic tests.
+- The mutant "sink check removed" joins `tests/deterministic_mutants.py`.
+- `test_aggregates_cannot_parameterize_a_customer_facing_action` (an aggregate in an argument
+  and in pc) is marked with that mutant.
+- A new `test_aggregates_cannot_select_a_customer_facing_action` covers an aggregate in pc
+  only: literal credit arguments under a `map` over `order_stats`. Under the mutant, that run
+  executes a credit, and the number of credits leaks the group count to the customer.
+- Both tests fail under the mutant.
+
+**Rejected.** *A confidentiality NI property*, with paired worlds that differ in aggregate
+inputs and observations that include customer-facing effects. It would be the principled
+check, but it is a new property outside SPEC §5, so it is out of v1 scope; it is recorded
+for later. The two deterministic tests check the policy rule the property would rest on.
