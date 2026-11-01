@@ -408,6 +408,10 @@ Rules every policy obeys (tested in Phase 1):
   trusted columns, never against a plan-computed value.
 - **P5. Sinks.** Each argument of a consequential tool declares a sink. The argument's `S` and the
   action's `pc.S` must both contain it, or the verdict is BLOCK.
+- **P6. Per-customer credit bound.** A credit that would be the customer's second (one is
+  already recorded, or `A` holds another credit to them) is NEEDS_APPROVAL whatever its labels.
+  Customers open tickets freely, so a per-ticket bound alone is no per-customer bound (Gate 2
+  #6). It lives in the policy so it holds for trusted credits too (Gate 3 #2, D-062).
 
 Example, `issue_refund(ticket_id, order_id, amount)`:
 
@@ -533,7 +537,7 @@ authority (`incident_orders`).
 | `incident_orders(incident_id)` | read | | staff-written, trusted |
 | `order_stats()` | read | | groups with fewer than `MIN_GROUP` orders suppressed; sinks `{operator}` |
 | `close_ticket(ticket_id, resolution)` | consequential | missing or closed ticket, resolution not in the enum, same ticket twice in `A` | no rule: untrusted pc or args go to approval |
-| `issue_credit(ticket_id, customer_id, amount, reason)` | consequential | not the ticket's customer, amount ≤ 0 or > `CREDIT_MAX`, reason not in the enum, two credits for one ticket in `A`, ticket already credited | rule `ticket_goodwill_credit` |
+| `issue_credit(ticket_id, customer_id, amount, reason)` | consequential | not the ticket's customer, amount ≤ 0 or > `CREDIT_MAX`, reason not in the enum, two credits for one ticket in `A`, ticket already credited | rule `ticket_goodwill_credit`; P6: a customer's second credit (already credited, or two credits to them in `A`) needs approval whatever the labels (Gate 3 #2, D-062) |
 
 P5 is enforced from Phase 2: refunds and credits have sink `customer:C`, so an aggregate (sinks
 `{operator}`) in any argument or in `pc` gives BLOCK. Strings in consequential arguments are

@@ -19,6 +19,7 @@ from kernel.run import Environment, RunResult, run_plan, run_task
 from planners.builders import (
     Json,
     call,
+    credit_ticket_customer,
     expr,
     filter_,
     lit,
@@ -29,7 +30,13 @@ from planners.builders import (
     refund_from_ticket_text,
 )
 from planners.fuzz import CASE_CUSTOMER, CASE_TICKET, _case_world, raw_extractor
-from planners.oracle import OraclePlanner, credit_if_order_mentioned, refund_amount
+from planners.oracle import (
+    OraclePlanner,
+    credit,
+    credit_if_order_mentioned,
+    refund_amount,
+    steps_of,
+)
 from tests.ni_properties import check_ni1, check_ni3, effects
 
 # --- findings 1 and 2: the cumulative extraction label --------------------------------
@@ -225,6 +232,38 @@ def test_goodwill_credits_are_bounded_per_customer_not_only_per_ticket() -> None
     assert outcomes == ["executed", "needs_approval", "needs_approval", "needs_approval"]
     count = env.db.execute("SELECT COUNT(*) FROM credits WHERE customer_id = ?", (CASE_CUSTOMER,))
     assert count.fetchone() == (1,)
+
+
+def test_probe_f_original_form_plain_read_credits_are_bounded_per_customer() -> None:
+    """Probe F as first written (Gate 3 review #2): plain ticket reads, no ticket text.
+    Since D-054 these credits are fully trusted and skip the goodwill rule, so the bound
+    must live in the credit policy itself; without it, four credits executed."""
+    world = _case_world(1, "in_transit").extend(
+        tickets=tuple(Ticket(t, CASE_CUSTOMER, "hi", "late again") for t in (4002, 4003, 4004))
+    )
+    env = Environment(materialize(world), PaymentMock(), raw_extractor)
+    outcomes = [
+        run_plan(credit_ticket_customer(t), env, run_id=f"f-{t}").outcome
+        for t in (CASE_TICKET, 4002, 4003, 4004)
+    ]
+    assert outcomes == ["executed", "needs_approval", "needs_approval", "needs_approval"]
+    count = env.db.execute("SELECT COUNT(*) FROM credits WHERE customer_id = ?", (CASE_CUSTOMER,))
+    assert count.fetchone() == (1,)
+
+
+def test_two_trusted_credits_to_one_customer_in_one_set_need_approval() -> None:
+    """The per-customer bound within one action set, for operator-stated credits."""
+    world = _case_world(1, "in_transit").extend(
+        tickets=(Ticket(4002, CASE_CUSTOMER, "hi", "late again"),)
+    )
+    env = Environment(materialize(world), PaymentMock(), raw_extractor)
+    both = steps_of(
+        credit(CASE_TICKET, CASE_CUSTOMER, 10_000, "goodwill"),
+        credit(4002, CASE_CUSTOMER, 10_000, "goodwill"),
+    )
+    result = run_plan(both, env, run_id="two")
+    assert [v.kind for v in result.verdicts] == ["NEEDS_APPROVAL", "NEEDS_APPROVAL"]
+    assert result.outcome == "needs_approval"
 
 
 # --- finding 7: one plan per task id survives a new Environment ----------------------

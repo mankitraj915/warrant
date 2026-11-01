@@ -7,7 +7,11 @@ Rules every policy here obeys:
 - P3 business invariants BLOCK whatever the labels;
 - P4 amounts are checked against the policy's own recomputation;
 - P5 every component, pc included, must be allowed to flow to the action's sink
-  (`customer:C`); aggregates may flow only to the operator.
+  (`customer:C`); aggregates may flow only to the operator;
+- P6 a credit that would be the customer's second (already recorded, or another
+  credit to them in the set) needs approval whatever its labels: customers open
+  tickets freely, so a per-ticket bound alone is no per-customer bound (Gate 2 #6,
+  Gate 3 #2).
 Rules are consulted for every action with an untrusted component, before the
 BLOCK checks, so whether a decision is logged depends only on labels.
 """
@@ -129,6 +133,19 @@ def _credit_block_reason(
     return None
 
 
+def _approval_bound(
+    action: ResolvedAction, actions: Sequence[ResolvedAction], reader: TrustedReader
+) -> str | None:
+    """P6: per-customer bound on credits, for trusted and rule-admitted credits alike."""
+    if action.tool != "issue_credit":
+        return None
+    if _same_tool(action, actions, "customer_id") > 1:
+        return "another credit for this customer is in the action set"
+    if reader.customer_has_credit(int(action.canonical_args()["customer_id"])):
+        return "this customer already has a credit"
+    return None
+
+
 _BLOCK_REASONS = {
     "issue_refund": _refund_block_reason,
     "close_ticket": _close_block_reason,
@@ -157,6 +174,10 @@ def decide_one(
     block = _block_reason(action, actions, reader)
     if block is not None:
         return Verdict("BLOCK", block), decision
+    if not untrusted or (decision is not None and decision.admitted):
+        bound = _approval_bound(action, actions, reader)
+        if bound is not None:
+            return Verdict("NEEDS_APPROVAL", bound), decision
     if not untrusted:
         return Verdict("ALLOW", "all components trusted"), decision
     if decision is not None and decision.admitted:
