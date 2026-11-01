@@ -646,6 +646,16 @@ cumulative label (§3).
   - This is the formal version of "unless it is an enumerated residual risk". The precondition
     compares the projection, not the admitted actions, so a rule that admits a different action
     than its release claims fails NI-3 directly (review findings 1 and 2).
+  - **Partial runs.** A run that stops as `partial` or `indeterminate` executes a prefix. That
+    happens after a provider failure, or after a verdict that became stricter between effects
+    (§10). Its `X` is a prefix of `X*`, not `X*`, so the statement above holds for runs that
+    finish. For a partial run, NI-3 claims only that `X` is a prefix of `X*`.
+  - **What the harness checks** (Gate 3 review #8):
+    - The single-run property injects no provider failures and has no concurrent writer, so a
+      partial run cannot arise in it. It checks "empty or `X*`".
+    - The multi-run property, which does inject provider failures, checks NI-2 and NI-4, not
+      NI-3.
+    - The prefix clause is therefore stated but not exercised.
 - **NI-4 (rule postconditions).** For every `E`, every executed action admitted by rule `R`
   satisfies `Post_R` (§6.2). It is checked by test code independent of the kernel, **over
   sequences of runs** on an evolving environment, because some postconditions ("only refund
@@ -654,6 +664,15 @@ cumulative label (§3).
   - the executed canonical set hashes to `h`, or nothing (or a reported partial prefix, §5)
     executes;
   - an approval issued in run `r` is rejected in any run `r′ ≠ r`, and on a second use in `r`.
+  - **What the harness checks** (Gate 3 review #8):
+    - The property (`tests/test_approval_binding.py`) treats *any* partial run as a violation,
+      which is stricter than the statement. Without injected failures or a concurrent writer
+      (as above), a partial run there can only come from a kernel bug, such as a re-check
+      that counts a relaxed verdict as stricter. The NI-5 mutant is caught only because of
+      that stricter check.
+    - The property's approver always answers with the current run's hash, so it never tests
+      the second clause. Replay, cross-run use and second use are deterministic unit tests in
+      the same file.
 - **Approval steering (recorded, not a violation):** `Req(P,E1) ≠ Req(P,E2)`.
 
 **Reported with every NI run:**

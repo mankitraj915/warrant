@@ -2796,3 +2796,27 @@ bodies. That is sound. Its cost to multi-ticket plans is unmeasured.
 - an approver that raises;
 - a leaked missing ticket;
 - `RecordLost` after the write-ahead row.
+
+## D-068 NI-3 and NI-5 versus partial runs, stated (2026-11-02; Gate 3 finding 8, issue #8)
+
+**Problem.** The reviewer found three places where DESIGN §9.3 and the harness differ:
+- NI-3 says each executed sequence is "empty or equal to X*", but a partial run executes a
+  prefix. Neither property exercises that case: the single-run harness injects no failures,
+  and the multi-run property does not check NI-3.
+- NI-5 allows "a reported partial prefix", but its harness treats any partial run as a
+  violation. The NI-5 mutant is detected only through that stricter check.
+- The NI-5 property never checks run binding; that is covered by unit tests only.
+
+**Decision.** As committed at Gate 3: document, don't change the properties.
+- NI-3 now states the prefix clause for partial runs, and says which harness checks what.
+- NI-5 now says the harness is stricter than the statement and why that is sound there. It
+  also points to the unit tests for run binding.
+
+**Rejected.**
+- *Injecting provider failures into the single-run NI-3 harness.* Paired runs would need the
+  failure at the same effect index on both sides, or the comparison is meaningless. That is
+  a new harness design, not a wording fix, and is recorded for after v1.
+- *Relaxing NI-5's harness to allow partial runs.* That would weaken the check that catches
+  the NI-5 mutant, and the owner reserved any weakening of a test.
+
+No test: documentation only. Nothing in the kernel or the harness changes.
