@@ -52,6 +52,12 @@ PENDING = "pending"
 PENDING_FIRST = True
 
 
+class RecordLost(Exception):
+    """The provider committed a refund whose pending row had disappeared. Under the
+    run lock only a writer outside the kernel can cause this (Gate 3 review #1); the
+    record is restored before this is raised."""
+
+
 class _Unknown:
     """The provider could not say whether a refund happened."""
 
@@ -166,7 +172,17 @@ def execute(
             return "indeterminate", done
         if ref is None:
             return ("partial" if done else "aborted"), done
-        db.execute("UPDATE refunds SET provider_ref = ? WHERE idempotency_key = ?", (ref, key))
+        recorded = db.execute(
+            "UPDATE refunds SET provider_ref = ? WHERE idempotency_key = ?", (ref, key)
+        ).rowcount
+        if recorded != 1:  # the pending row vanished: restore the record, then fail loudly
+            db.execute(
+                "INSERT INTO refunds (order_id, ticket_id, amount, idempotency_key, provider_ref)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (order, ticket, amount, key, ref),
+            )
+            db.commit()
+            raise RecordLost(key, ref)
         db.commit()
         done.append(Executed(action.site, action.tool, key, ref))
     return "executed", done

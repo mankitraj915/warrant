@@ -2524,3 +2524,45 @@ command, and nothing in the repository requires CI.
 
 Rejected: *self-hosted runner on the laptop* (the memory is the problem); *a matrix of stages in
 one run* (a 6-hour job limit per stage is simpler to reason about).
+
+## D-061 Single-writer run lock (2026-11-02; Gate 3 finding 1, issue #1)
+
+**Problem.**
+- The reviewer started a second run on the same database while a refund was in flight.
+  Its `recover()` deleted the first run's pending row, and the provider then committed.
+- The `provider_ref` UPDATE matched no row, and the run still reported `executed`.
+- A later ticket naming the same order was then admitted by `ticket_order_ownership`, and
+  the order was refunded twice.
+- Nothing stated whether more than one process may use a database.
+
+**Decision.**
+- Single writer per database. `run_plan` and `run_task` hold `kernel/runlock.py`'s lock from
+  before `recover()` until the final audit row.
+- Within a process: a registry of held databases. Across processes: an exclusive SQLite
+  transaction on `<database>.runlock`, which the operating system releases if the holder dies.
+- A run that finds the lock held raises `RunLocked`. It touches nothing, and its run id
+  stays unused.
+- A provider reference that matches no pending row restores the record and raises
+  `RecordLost`.
+- DESIGN §10 and THREAT_MODEL §6 now state the model. Writers that bypass the kernel are out
+  of scope.
+
+**Rejected.**
+- *A blocking lock with a timeout.* A run started from inside a run (re-entry, as in the
+  reviewer's probe) would deadlock until the timeout. Refusing at once is simpler, and a
+  caller that wants to wait can retry.
+- *One SQLite transaction spanning the run.* The pending row must be committed before the
+  provider call (Gate 1 #2); otherwise a crash loses the record.
+- *A lock row in the database with a lease.* A crash leaves the lock held until the lease
+  expires, so its length becomes a safety parameter. The OS releases a dead process's file
+  lock at once.
+- *Making `recover()` skip rows that belong to runs in flight.* This would fix the probe, but
+  not the reviewer's related hypothesis: two runs on two tickets of one customer could both
+  pass their re-checks before either inserts its pending row. The lock removes both.
+
+**Regression tests.** `tests/test_concurrency.py`, four tests; all four fail on the code
+before this change:
+- the reviewer's probe: the record survives, and the order is paid back once;
+- a refused run writes no audit row;
+- a second process holding the lock refuses a run until it exits;
+- a lost record raises and is restored.

@@ -11,6 +11,8 @@ request (the canonical set and its hash) for ``env.approver``; an approval is
 honoured only for this run, for the hash the kernel recomputes, and once
 (DESIGN §7, NI-5). The default approver denies. Run ids are single-use. Every
 run writes one append-only audit row (``audit`` table) explaining its decision.
+One run at a time per database: both entry points hold the run lock from before
+``recover`` until the final audit row (``runlock``, DESIGN §10).
 """
 
 import hashlib
@@ -29,6 +31,7 @@ from .interpreter import Interpreter, ResolvedAction
 from .labels import STAR, Label, join
 from .plan_lang import PlanRejected, check_plan, parse_plan
 from .policy import Verdict, decide
+from .runlock import run_lock
 from .tools.database import Database, ResolutionHalted, lossless_text
 from .tools.registry import signatures
 from .values import Record, Scalar, UnitV, plain, whole_label
@@ -139,6 +142,20 @@ def run_plan(
     plan_label: Label = OPERATOR,
     task_id: str | None = None,
     planner_input_hash: str | None = None,
+) -> RunResult:
+    """Run one plan. Raises ``RunLocked``, touching nothing, if another run holds
+    the database's run lock (single writer, DESIGN §10)."""
+    with run_lock(env.db):
+        return _run_plan(raw_plan, env, run_id, plan_label, task_id, planner_input_hash)
+
+
+def _run_plan(
+    raw_plan: Any,
+    env: Environment,
+    run_id: str,
+    plan_label: Label,
+    task_id: str | None,
+    planner_input_hash: str | None,
 ) -> RunResult:
     env.db.text_factory = lossless_text
     recover(env.db, env.provider)
@@ -266,6 +283,18 @@ def run_task(
     label, which literals and the root pc inherit, becomes as untrusted as they are.
     """
     run_id = run_id or str(uuid.uuid4())
+    with run_lock(env.db):
+        return _run_task(task_id, request, planner, env, leak_ticket_bodies, run_id)
+
+
+def _run_task(
+    task_id: str,
+    request: str,
+    planner: Planner,
+    env: Environment,
+    leak_ticket_bodies: tuple[int, ...],
+    run_id: str,
+) -> RunResult:
     planned = env.db.execute(
         "SELECT 1 FROM audit WHERE json_extract(record, '$.task_id') = ?", (task_id,)
     ).fetchone()
@@ -282,11 +311,11 @@ def run_task(
             assert isinstance(body, Scalar)
             context.append((str(body.value), body.label))
     planner_input = PlannerInput(request, signatures(), tuple(context))
-    return run_plan(
+    return _run_plan(
         planner.plan(planner_input),
         env,
-        run_id=run_id,
-        plan_label=planner_input.label(),
-        task_id=task_id,
-        planner_input_hash=planner_input.digest(),
+        run_id,
+        planner_input.label(),
+        task_id,
+        planner_input.digest(),
     )
