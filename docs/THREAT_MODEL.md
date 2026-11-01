@@ -93,6 +93,11 @@ lower than the evaluation shows. The steering rate is reported to make that gap 
   problem of the planner, not a violation of the invariant.
 - Social engineering of the approver beyond what the steering metric captures.
 - Real third-party integrations: the database and payment provider are simulated.
+- Writers that bypass the kernel. The kernel assumes one run at a time per database, which
+  its run lock enforces between kernel runs, and that only kernel runs write refunds,
+  credits, approvals, audit rows and ticket status (DESIGN §10). Code that changes those
+  tables directly is outside the model, like host compromise. The kernel detects one
+  consequence: a refund record that disappears mid-call raises `RecordLost`.
 
 ## 7. Security goal
 

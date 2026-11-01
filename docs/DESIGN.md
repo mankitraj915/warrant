@@ -730,6 +730,28 @@ As SPEC §4.7:
 Idempotency is a reliability mechanism. Security never depends on it: duplicates are already
 BLOCKed by the policy (P3), and the record is written before money moves (Gate 1 review #2).
 
+**Concurrency model: a single writer per database (Gate 3 review #1, D-061).**
+- Each database has one run at a time. `run_plan` and `run_task` take the database's run lock
+  (`kernel/runlock.py`) before `recover()`, and hold it until the final audit row is written.
+- A run that finds the lock held raises `RunLocked`. It writes nothing, and its run id stays
+  unused.
+- How the lock works:
+  - Within a process, the lock is a registry of held databases.
+  - Across processes, it is an exclusive SQLite transaction on `<database>.runlock`.
+  - The operating system releases that transaction when the holder dies, so a crash leaves
+    no stale lock.
+- Kernel runs are the only writers of `refunds`, `credits`, `approvals`, `audit` and ticket
+  status. Other parties may add tickets, orders and customers concurrently; their existence
+  is already attacker-influenced (§2.1).
+- Without the lock, a second run's `recover()` could delete an in-flight run's pending row.
+  The provider then committed, the record was lost, and the ownership rule paid the order a
+  second time.
+- If the provider's reference matches no pending row, the kernel restores the record and
+  raises `RecordLost`. It never reports a clean execution. Under the lock, only a writer
+  outside the kernel can cause this.
+- Tests: `tests/test_concurrency.py` (the reviewer's probe, re-entry, a second process, a lost
+  record).
+
 ## 11. Persistence (storage label rule)
 
 Revised after review finding 4.
