@@ -9,8 +9,8 @@ example database, and generation pinned to the seed (``tests/determinism.py``),
 so the result does not depend on what else the process ran. Every mutant runs
 against the shapes properties; the grammar properties run the mutants the
 grammar generator catches on its own (D-056 coverage table). ``check`` replays
-one measured detection per mutant (``WITNESSES``); the full budgets
-(``BUDGETS``) run in the owner-run ``scripts/mutant_rates.py verify``.
+one measured detection per mutant (``WITNESSES``); the k-seed designs
+(``KSEED``) run in the owner-run ``scripts/mutant_rates.py kseed``.
 """
 
 from collections.abc import Callable
@@ -149,20 +149,43 @@ PROPERTIES: dict[str, tuple[dict[str, tuple[Any, str, Any]], Any]] = {
     "multirun": (MULTIRUN_MUTANTS, multirun_property),
     "NI-5": (NI5_MUTANTS, ni5_property),
 }
-# The owner-run verify checks every budget at these three seeds, none used to set a budget
-# (rates: 202616001-005; D-056 "Validation").
-VERIFY_SEEDS = (202617001, 202617002, 202617003)
-# Examples per (property, plan source), from the clean-state rates (results/phase3-rates,
-# results/phase3b/budgets.json): for each mutant, its latest first detection over five seeds
-# plus ln(1000)/p, p the 95% lower bound of its pooled rate, rounded up to 500; the property
-# takes the largest (D-056). The full budgets run in the owner-run stage b, not in ``check``.
-BUDGETS: dict[tuple[str, str], int] = {
-    ("NI", "shapes"): 3000,
-    ("multirun", "shapes"): 3500,
-    ("NI-5", "shapes"): 8000,
-    ("NI", "grammar"): 4000,
-    ("multirun", "grammar"): 3000,  # catches nothing alone: coverage rows only
-    ("NI-5", "grammar"): 3000,  # catches nothing alone: coverage rows only
+# Detection design per required mutant (D-058): k independent seeds of n examples each; the
+# mutant is caught if any seed catches it. Within one seed detections come in bursts, so a
+# miss probability is claimed only across seeds: (1 - q_low)^k <= 1%, where q_low is the
+# one-sided 95% Clopper-Pearson bound on the share of seeds that catch within n examples
+# (eight measured seeds per mutant; results/phase3b/kseed_design.json). These run in the
+# owner-run ``scripts/mutant_rates.py kseed``, at seeds KSEED_BASE + 1 ... KSEED_BASE + k,
+# none of which was used to estimate q.
+KSEED_BASE = 202618000
+KSEED: dict[tuple[str, str, str], tuple[int, int]] = {
+    ("NI", "grammar", "extractor output labelled trusted"): (250, 14),
+    ("NI", "grammar", "map body pc ignores list structure"): (250, 22),
+    ("NI", "grammar", "point read of a missing trusted ticket does not halt"): (500, 4),
+    ("NI", "grammar", "policy ignores pc"): (1000, 4),
+    ("NI", "shapes", "at ignores index label"): (250, 10),
+    ("NI", "shapes", "extraction ignores control"): (2000, 4),
+    ("NI", "shapes", "extractor output labelled trusted"): (250, 4),
+    ("NI", "shapes", "filter ignores predicate labels"): (500, 4),
+    ("NI", "shapes", "goodwill rule ignores amount"): (250, 22),
+    ("NI", "shapes", "goodwill rule ignores origin set"): (1000, 4),
+    ("NI", "shapes", "map body pc ignores list structure"): (500, 4),
+    ("NI", "shapes", "ownership rule drops uniqueness"): (250, 4),
+    ("NI", "shapes", "ownership rule ignores origin set"): (500, 4),
+    ("NI", "shapes", "point read of a missing trusted ticket does not halt"): (250, 4),
+    ("NI", "shapes", "policy ignores pc"): (250, 4),
+    ("NI-5", "shapes", "re-check treats a relaxed verdict as stricter"): (1000, 14),
+    ("multirun", "shapes", "execution writes no record before the provider call"): (1000, 4),
+    ("multirun", "shapes", "goodwill rule drops the per-customer bound"): (250, 4),
+    ("multirun", "shapes", "ownership rule drops never-refunded order"): (250, 14),
+    ("multirun", "shapes", "ownership rule drops once-per-ticket across runs"): (250, 22),
+}
+# Held-out mutants (D-057) run, per property and source, at the largest n and largest k of
+# that property's known mutants.
+HELDOUT_DESIGN: dict[tuple[str, str], tuple[int, int]] = {
+    ("NI", "grammar"): (1000, 22),
+    ("NI", "shapes"): (2000, 22),
+    ("NI-5", "shapes"): (1000, 14),
+    ("multirun", "shapes"): (1000, 22),
 }
 # Mutants the grammar generator catches on its own at every rate seed (D-056 coverage table).
 GRAMMAR_CATCHES: dict[str, tuple[str, ...]] = {
@@ -241,5 +264,5 @@ def test_harness_catches_mutant(
         _run_property(WITNESS_EXAMPLES, prop_fn, source, WITNESSES[prop, source, name])()
 
 
-def test_every_required_mutant_has_a_witness() -> None:
-    assert sorted(WITNESSES) == _cases()
+def test_every_required_mutant_has_a_witness_and_a_design() -> None:
+    assert sorted(WITNESSES) == _cases() == sorted(KSEED)

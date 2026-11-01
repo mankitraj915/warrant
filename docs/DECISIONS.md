@@ -1592,6 +1592,12 @@ reliably free more memory than having it open (830–985 MB above): other proces
 Phase 4, plan on about 300 MB of headroom at worst, not 1 GB. A quantized model whose resident
 size approaches that will contend with the rest of the machine.
 
+**Stage b (2026-11-01, Claude Code closed):** 182 MB free before one step, and 47.5, 88.8 and
+110.7 MB before three grammar fuzz chunks (`results/phase3b-run`). So the worst case is now under
+50 MB, not 300 MB. Phase 4 must assume almost no headroom: a local model's resident memory comes
+out of what other projects are using, and the owner-run LLM evaluation should check available
+memory before loading the model and refuse to start below a stated threshold.
+
 **Plan.** `eval-llm` runs the same way as the fuzz and the Phase 3 run: one command, run by the
 owner with Claude Code closed, from a clean worktree at a fixed commit. It refuses a dirty tree,
 logs every step's output and exit code, records available memory and resumes. The model's memory
@@ -2145,3 +2151,132 @@ and `kernel/`: not `planners/`, not `tests/`, not the existing mutant list, not 
 
 Rejected: *writing the held-out mutants myself* (I know the generator); *letting the reviewer
 see the existing mutants* (it would write variations of them).
+
+## Phase 3 owner run: stage b results (commit c4b52a6, verified 2026-11-01)
+
+Eleven steps, 10 passed. Every row of `results/phase3b-run/steps.jsonl` is at c4b52a6 with a
+clean tree before and after. Every pytest step's log now ends with its summary line.
+
+| step | exit | time | result |
+|---|---|---|---|
+| `check` | 0 | 56 s | 250 passed in 51.04 s; ruff, format, mypy clean |
+| `mutant-verify` | **1** | 2,806 s | 97 rows. Every required mutant caught at all three fresh seeds except the NI-5 mutant at 202617002 (below) |
+| NI statistics, shapes, single-run | 0 | 32 s | 2,000 passing, 0 failing, 73 invalid; "1 passed" |
+| NI statistics, shapes, multirun | 0 | 24 s | 2,000 passing, 0 failing, 267 invalid |
+| NI statistics, shapes, NI-5 | 0 | 18 s | 2,000 passing, 0 failing, 146 invalid |
+| NI statistics, grammar, single-run | 0 | 33 s | 2,000 passing, 0 failing, 102 invalid |
+| NI statistics, grammar, multirun | 0 | 33 s | 2,000 passing, 0 failing, 121 invalid |
+| NI statistics, grammar, NI-5 | 0 | 21 s | 2,000 passing, 0 failing, 216 invalid |
+| fuzz chunks, grammar single-run | 0 | 172 s | 10 × 1,000 (seeds 202614800–809), 0 failing, 619 invalid |
+| fuzz chunks, grammar multirun | 0 | 178 s | 10 × 1,000 (202614900–909), 0 failing, 601 invalid |
+| fuzz chunks, grammar NI-5 | 0 | 116 s | 10 × 1,000 (202615000–009), 0 failing, 1,072 invalid |
+
+Peak RSS of a fuzz chunk: at most 117.4 MB.
+
+**Budget validation at fresh seeds (D-056 rule):**
+- Every shapes mutant at its property budget, and every `GRAMMAR_CATCHES` mutant at the NI grammar
+  budget, was caught at all three fresh seeds (202617001–003), except one.
+- **The miss:** the NI-5 mutant at seed 202617002, budget 8,000. The `extend` run (32,000) first
+  caught it at 9,080, with 32 violations in 34,350 calls. This is exactly the in-session smoke
+  result (D-056 "Validation"), as pinned generation predicts.
+- Latest detections among the catches: "extraction ignores control" at 1,954 and 1,916 (budget
+  3,000); grammar "map body pc" at 1,787 (budget 4,000).
+
+**Grammar coverage rows:** 36 rows (12 mutants not in `GRAMMAR_CATCHES` × 3 seeds); 2 caught.
+"Goodwill rule ignores origin set", grammar NI, was caught at 839 and 1,911, the first grammar
+detections of a declassification-rule mutant. At the rate seeds it had 0 in 5,298, so it stays
+out of `GRAMMAR_CATCHES`.
+
+**NI statistics** (Hypothesis's event percentages over all examples):
+
+| | shapes | grammar | stage a (mixed, shapes part) | Gate 2 |
+|---|---|---|---|---|
+| single-run: pairs with no halt (NI-1 checked) | 73.4% | 74.3% | 71% | 100% |
+| single-run: NI-3 constrained effects | 28.8% | 2.6% | 25% | 46% |
+| NI-5: approval requested | 8.7% | 0.4% | | |
+| NI-5: run halted | 17.2% | 16.6% | | |
+| multirun: run 1 / run 2 halted | about 7% / 9% | 14.5% / 13.3% | | |
+
+**Memory with Claude Code closed** (owner): free RAM fell to 182 MB before step 7. Between fuzz
+chunks it fell further: 47.5 MB before the last grammar NI-5 chunk, and 88.8 and 110.7 MB before
+two others. The chunks still passed (peak RSS at most 117 MB). Recorded in D-055 for Phase 4.
+
+## D-058 Mutant detection as k independent seeds (owner, 2026-11-01; final redesign)
+
+**Why.** Within one seed, detections come in bursts (D-056), so one long run cannot support a
+miss-probability claim. Seeds are independent: each starts its own pseudo-random stream in a
+fresh process with pinned generation. So the claim is made across seeds.
+
+**Design.** For each required mutant, k seeds of n examples; the mutant is caught if any seed
+catches it.
+- `q` = the probability that one seed of n examples catches the mutant.
+- **Estimated from every clean-state seed measured:** the 5 rate seeds (5 extended to 4,000 or
+  more when they had 0 at 1,000) and the 3 stage-b seeds (run to their budget, or extended).
+  That makes 8 seeds per mutant, each with a known first detection.
+- A seed counts as catching within n if its first detection is at most n. `n` is chosen only
+  where every seed's outcome at n is known.
+- `q_low` = the exact one-sided 95% Clopper–Pearson lower bound on x caught of 8.
+- `k` = the smallest k with `(1 - q_low)^k <= 1%`.
+- `n` is chosen from a fixed grid (250, 500, 1,000, 1,500, 2,000, 3,000) to minimise k·n.
+- **Impractical** (fixed before computing): k·n above 50,000 examples for one mutant. That is
+  about 15 minutes, and would be called a coverage gap.
+- Computed by `scratchpad/kseed.py`, written to `results/phase3b/kseed_design.json`, and set in
+  `KSEED` in `tests/test_ni_mutants.py`.
+
+| property | source | mutant | first detections (8 seeds) | n | x/8 | q_low | k | k·n | est. miss |
+|---|---|---|---|---|---|---|---|---|---|
+| NI | shapes | at ignores index label | 7 … 815 | 250 | 6 | 0.400 | 10 | 2,500 | 0.6% |
+| NI | shapes | extraction ignores control | 359 … 1,954 | 2,000 | 8 | 0.688 | 4 | 8,000 | 0.95% |
+| NI | shapes | extractor output labelled trusted | 3 … 30 | 250 | 8 | 0.688 | 4 | 1,000 | 0.95% |
+| NI | shapes | filter ignores predicate labels | 3 … 359 | 500 | 8 | 0.688 | 4 | 2,000 | 0.95% |
+| NI | shapes | goodwill rule ignores amount | 146 … 1,741 | 250 | 4 | 0.193 | 22 | 5,500 | 0.9% |
+| NI | shapes | goodwill rule ignores origin set | 10 … 850 | 1,000 | 8 | 0.688 | 4 | 4,000 | 0.95% |
+| NI | shapes | map body pc ignores list structure | 5 … 359 | 500 | 8 | 0.688 | 4 | 2,000 | 0.95% |
+| NI | shapes | ownership rule drops uniqueness | 3 … 244 | 250 | 8 | 0.688 | 4 | 1,000 | 0.95% |
+| NI | shapes | ownership rule ignores origin set | 107 … 430 | 500 | 8 | 0.688 | 4 | 2,000 | 0.95% |
+| NI | shapes | point read of a missing trusted ticket does not halt | 3 … 184 | 250 | 8 | 0.688 | 4 | 1,000 | 0.95% |
+| NI | shapes | policy ignores pc | 10 … 154 | 250 | 8 | 0.688 | 4 | 1,000 | 0.95% |
+| multirun | shapes | execution writes no record before the provider call | 93 … 933 | 1,000 | 8 | 0.688 | 4 | 4,000 | 0.95% |
+| multirun | shapes | goodwill rule drops the per-customer bound | 42 … 201 | 250 | 8 | 0.688 | 4 | 1,000 | 0.95% |
+| multirun | shapes | ownership rule drops never-refunded order | 3 … 513 | 250 | 5 | 0.289 | 14 | 3,500 | 0.8% |
+| multirun | shapes | ownership rule drops once-per-ticket across runs | 29 … 1,231 | 250 | 4 | 0.193 | 22 | 5,500 | 0.9% |
+| NI-5 | shapes | re-check treats a relaxed verdict as stricter | 253 … 9,080 | 1,000 | 5 | 0.289 | 14 | 14,000 | 0.8% |
+| NI | grammar | extractor output labelled trusted | 86 … 829 | 250 | 5 | 0.289 | 14 | 3,500 | 0.8% |
+| NI | grammar | map body pc ignores list structure | 86 … 1,787 | 250 | 4 | 0.193 | 22 | 5,500 | 0.9% |
+| NI | grammar | point read of a missing trusted ticket does not halt | 91 … 361 | 500 | 8 | 0.688 | 4 | 2,000 | 0.95% |
+| NI | grammar | policy ignores pc | 122 … 795 | 1,000 | 8 | 0.688 | 4 | 4,000 | 0.95% |
+
+**Reading.**
+- No required mutant needs an impractical k·n; the largest is the NI-5 mutant at 14,000. There
+  is no coverage gap among the required mutants.
+- The two grammar coverage rows with any detection would need k·n of 179,750 (filter predicate
+  labels, 1 of 8 seeds) and 719,000 (goodwill origin set, 1 of 8 within 1,000). They are coverage
+  gaps of the grammar generator, as D-056 already reported, and stay out of `GRAMMAR_CATCHES`.
+- With 8 seeds, the best possible `q_low` is 0.688 (8 of 8). So k is at least 4 for every
+  mutant: the design is limited by how many seeds were measured, not by the mutants.
+- **Optimism in the estimate:** n is picked from the grid on the same 8 seeds it is evaluated
+  on. The estimate also rests on the Clopper–Pearson bound with 8 observations. It is an
+  estimate at the 1% level, not a measured miss rate.
+- **The stage-b miss stays in the record.** NI-5 at seed 202617002 is one of the 8 seeds
+  (first detection 9,080). It is why the NI-5 design needs k = 14.
+
+**Where it runs.**
+- `check` keeps the exact-replay witnesses (D-056).
+- The k-seed designs run in the owner-run `phase3-run --stage c` (`mutant_rates.py kseed`), at
+  seeds 202618001 onwards. None of these was used to estimate q, so the run tests the design.
+- The held-out mutants (D-057) run at each property's largest n and largest k (`HELDOUT_DESIGN`):
+  - NI shapes: 22 seeds × 2,000;
+  - NI grammar: 22 × 1,000;
+  - multirun shapes: 22 × 1,000;
+  - NI-5 shapes: 14 × 1,000.
+
+  A held-out mutant is caught if any seed of any of these catches it.
+- **This is the last redesign** (owner). Whatever stage c or the held-out run shows is reported
+  as it is.
+
+Rejected:
+- *Pool examples across seeds into a rate:* the bursts make that rate's binomial bound wrong
+  (D-056).
+- *Wilson bound:* with 8 of 8 it gives about 0.68, close to Clopper–Pearson. The exact bound
+  avoids arguing about approximations at small m.
+- *Measuring more seeds first to shrink k:* the owner asked for no further iteration.

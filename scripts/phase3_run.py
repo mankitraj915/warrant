@@ -28,7 +28,8 @@ properties by plan source):
   1. ``check``;
   2. ``mutant-verify``: every mutant against the shapes and the grammar properties
      from a clean state, at the budgets and three fresh seeds; a required miss is
-     followed by a run at four times the budget (``mutant_rates.py verify``);
+     followed by a run at four times the budget (``mutant_rates.py verify``, which
+     D-058 replaced with ``kseed``; run it from commit c4b52a6);
   3. NI statistics, 2,000 randomized examples for each of the six properties;
   4. chunked random fuzz of the three grammar properties (10 x 1,000 examples each;
      the shapes were fuzzed in stage a and their generator is unchanged).
@@ -40,7 +41,11 @@ counts for every mutant, property and source, 1,000 examples at each of five
 seeds (``RATE_SEEDS``). They set the stage-b budgets and the seed witnesses that
 ``check`` runs.
 
-Usage: ``python scripts/tasks.py phase3-run --out <dir> [--stage a|b|rates] [--resume]``.
+Stage ``c`` (``--stage c``; D-058): ``check``, then ``mutant-kseed``: every required mutant
+at its k-seed design (k fresh seeds of n examples, caught if any seed catches it;
+``mutant_rates.py kseed``).
+
+Usage: ``python scripts/tasks.py phase3-run --out <dir> [--stage a|b|c|rates] [--resume]``.
 """
 
 import argparse
@@ -150,6 +155,12 @@ def steps_rates(out: Path) -> list[tuple[str, list[str], dict[str, str], list[st
     return [("mutant-rates", cmd, {}, [])]
 
 
+def steps_c(out: Path) -> list[tuple[str, list[str], dict[str, str], list[str]]]:
+    kseed = [PY, "scripts/mutant_rates.py", "kseed", "--resume"]
+    kseed += ["--out", str(out / "mutant_kseed.jsonl")]
+    return [("check", [PY, "scripts/tasks.py", "check"], {}, []), ("mutant-kseed", kseed, {}, [])]
+
+
 def passed(log: Path) -> set[str]:
     if not log.exists():
         return set()
@@ -161,7 +172,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--resume", action="store_true")
-    parser.add_argument("--stage", choices=["a", "b", "rates"], default="a")
+    parser.add_argument("--stage", choices=["a", "b", "c", "rates"], default="a")
     args = parser.parse_args(argv)
     if git("status", "--porcelain"):
         print("refusing to run: the working tree is not clean (commit or use a clean worktree)")
@@ -175,7 +186,7 @@ def main(argv: list[str]) -> int:
     out.mkdir(parents=True, exist_ok=True)
     done = passed(log)
     failures = 0
-    plan = {"a": steps, "b": steps_b, "rates": steps_rates}[args.stage](out)
+    plan = {"a": steps, "b": steps_b, "c": steps_c, "rates": steps_rates}[args.stage](out)
     for i, (name, cmd, env, copies) in enumerate(plan, 1):
         if name in done:
             print(f"[{i}/{len(plan)}] {name}: already passed, skipped", flush=True)

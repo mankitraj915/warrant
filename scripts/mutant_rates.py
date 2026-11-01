@@ -12,21 +12,25 @@ Modes:
   seed are not independent (Hypothesis explores around earlier examples), so
   rates come from several seeds. These rates set the budgets in
   ``tests/test_ni_mutants.py`` (rule in DECISIONS D-056).
-- ``verify``: for every mutant, property and source, run the property at its
-  budget (``BUDGETS``) at each of ``VERIFY_SEEDS`` (fresh: none set a budget),
-  stopping at the first violation, and record caught or missed and the example
-  index of the detection. A shapes miss, or a miss of a mutant listed in
-  ``GRAMMAR_CATCHES``, makes the exit code 1 and is followed by an ``extend``
-  count run at four times the budget at the same seed, which records where the
-  first detection actually came (for a corrected budget, reported separately).
-  Other grammar rows are the coverage table.
+- ``kseed`` (D-058): for every required mutant (every shapes mutant, and the
+  grammar's ``GRAMMAR_CATCHES``), run its design ``KSEED`` = (n, k): k seeds
+  ``KSEED_BASE + 1 .. + k``, n examples each, each stopping at its first
+  violation. The mutant is caught if any seed catches it; a mutant no seed
+  catches makes the exit code 1. Every seed runs, so the per-seed detection
+  share is recorded too.
+- ``heldout`` (D-057): every mutant in ``tests/heldout_mutants.py`` against each
+  (property, source) of ``HELDOUT_DESIGN`` in order, at that design's k seeds of
+  n examples, stopping at the first seed that catches it. Exit code 0: held-out
+  results are reported, not required.
+
+The single-seed ``verify`` mode that stage b ran (D-056) is at commit c4b52a6.
 
 ``--rule gate2`` runs with the Phase 1-2 existence rule (taint kept, no halt), to
 attribute a rate change to D-054. One JSON line per measurement goes to
 ``--out``; ``--resume`` skips measurements already in it.
 
-Usage: ``python scripts/mutant_rates.py rates --examples 3000 --seed 7 --out FILE``
-or ``python scripts/mutant_rates.py verify --out FILE``.
+Usage: ``python scripts/mutant_rates.py rates --examples 3000 --seed 7 --out FILE``,
+or ``kseed`` / ``heldout`` with ``--out FILE``.
 """
 
 import argparse
@@ -51,10 +55,10 @@ from hypothesis import strategies as st  # noqa: E402
 import kernel.tools.database  # noqa: E402
 from tests.ni_properties import NIViolation  # noqa: E402
 from tests.test_ni_mutants import (  # noqa: E402
-    BUDGETS,
-    GRAMMAR_CATCHES,
+    HELDOUT_DESIGN,
+    KSEED,
+    KSEED_BASE,
     PROPERTIES,
-    VERIFY_SEEDS,
     _run_property,
 )
 
@@ -107,8 +111,14 @@ def one(spec: dict[str, Any]) -> dict[str, Any]:
         kernel.tools.database.POINT_READ_EXISTENCE = True
         kernel.tools.database.HALT_ON_ABSENT_TRUSTED_TICKET = False
     mutants, prop_fn = PROPERTIES[spec["property"]]
-    module, attribute, value = mutants[spec["mutant"]]
-    setattr(module, attribute, value)
+    if spec.get("heldout"):
+        from tests.heldout_mutants import HELDOUT
+
+        patches = HELDOUT[spec["mutant"]]
+    else:
+        patches = [mutants[spec["mutant"]]]
+    for module, attribute, value in patches:
+        setattr(module, attribute, value)
     start = time.monotonic()
     measure = catch if spec["measurement"] == "catch" else count
     result = measure(prop_fn, spec["source"], spec["examples"], spec["seed"])
@@ -149,18 +159,34 @@ def specs(args: argparse.Namespace) -> list[dict[str, Any]]:
                                 "seed": seed_,
                             }
                         )
-                else:
-                    budget = BUDGETS[prop, source]
-                    for seed_ in VERIFY_SEEDS:
-                        out.append(
-                            {**base, "measurement": "catch", "examples": budget, "seed": seed_}
-                        )
+                elif (prop, source, name) in KSEED:  # kseed
+                    n, k = KSEED[prop, source, name]
+                    for i in range(1, k + 1):
+                        seed_ = KSEED_BASE + i
+                        out.append({**base, "measurement": "catch", "examples": n, "seed": seed_})
     return out
 
 
-def required(row: dict[str, Any]) -> bool:
-    """A verify row that must be caught: every shapes row, and the grammar's listed ones."""
-    return row["source"] == "shapes" or row["mutant"] in GRAMMAR_CATCHES[row["property"]]
+def heldout_specs() -> list[dict[str, Any]]:
+    from tests.heldout_mutants import HELDOUT
+
+    out = []
+    for name in HELDOUT:
+        for (prop, source), (n, k) in HELDOUT_DESIGN.items():
+            for i in range(1, k + 1):
+                out.append(
+                    {
+                        "property": prop,
+                        "source": source,
+                        "mutant": name,
+                        "rule": "current",
+                        "heldout": True,
+                        "measurement": "catch",
+                        "examples": n,
+                        "seed": KSEED_BASE + i,
+                    }
+                )
+    return out
 
 
 def wilson_low(k: int, n: int, z: float = 1.96) -> float:
@@ -174,7 +200,7 @@ def wilson_low(k: int, n: int, z: float = 1.96) -> float:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["rates", "verify", "one"])
+    parser.add_argument("mode", choices=["rates", "kseed", "heldout", "one"])
     parser.add_argument("--out", type=Path)
     parser.add_argument("--examples", type=int, default=3000)
     parser.add_argument("--seed", type=int, action="append")
@@ -214,17 +240,30 @@ def main(argv: list[str]) -> int:
         print(json.dumps(row), flush=True)
         return row
 
-    missed = 0
-    for spec in specs(args):
-        row = measured(spec)
-        if row is None:
-            return 2
-        if row["measurement"] == "catch" and not row["caught"] and required(row):
-            missed += 1  # a miss against the D-056 rule: find where detection came
-            extend = {**spec, "measurement": "extend", "examples": 4 * spec["examples"]}
-            if measured(extend) is None:
+    if args.mode == "heldout":
+        caught: set[str] = set()
+        for spec in heldout_specs():
+            if spec["mutant"] in caught:
+                continue
+            row = measured(spec)
+            if row is None:
                 return 2
-    return 1 if missed else 0
+            if row["caught"]:
+                caught.add(spec["mutant"])
+        return 0
+    if args.mode == "kseed":
+        by_mutant: dict[tuple[str, str, str], bool] = {}
+        for spec in specs(args):
+            row = measured(spec)
+            if row is None:
+                return 2
+            group = (spec["property"], spec["source"], spec["mutant"])
+            by_mutant[group] = by_mutant.get(group, False) or bool(row["caught"])
+        return 0 if all(by_mutant.values()) else 1
+    for spec in specs(args):  # rates
+        if measured(spec) is None:
+            return 2
+    return 0
 
 
 if __name__ == "__main__":

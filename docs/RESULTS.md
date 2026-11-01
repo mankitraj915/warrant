@@ -165,13 +165,93 @@ on what an approval costs there.
 
 ## Non-interference evidence
 
-PENDING (owner-run stage b; DECISIONS D-056): the clean-state mutant verification and the grammar
-coverage table go here.
+The non-interference (NI) properties (SPEC §5; DESIGN §9.4) run without any model. Two questions
+matter:
+- Do they pass on the real kernel?
+- Would they fail if the kernel were broken? That is what the mutant measurements test.
 
-**Random fuzzing, all passed:**
-- **Gate 2 fixes (commit 0905584):** 20,000 examples each of single-run NI, multi-run NI and NI-5;
-  0 failing (D-050).
-- **Phase 3 code (6e27f60, mixed generator):** the same, 20,000 examples each; 0 failing.
+### Random fuzzing: every run passed
+
+| code | property | examples | failing |
+|---|---|---|---|
+| Gate 2 fixes (0905584) | single-run NI, multi-run NI, NI-5 (shapes) | 20,000 each | 0 (D-050) |
+| Phase 3, mixed generator (6e27f60) | the same three | 20,000 each | 0 (stage a) |
+| Phase 3, split generators (c4b52a6) | the three grammar-plan properties | 10,000 each | 0 (stage b) |
+| Phase 3, split generators (c4b52a6) | all six properties, statistics runs | 2,000 each | 0 (stage b) |
+
+**How much each pass actually checks** (stage b statistics; DECISIONS "stage b results"):
+- **Single-run NI:** 73% of shape pairs and 74% of grammar pairs had no halted run, so NI-1
+  compared their effects. A run halts when an operator-named ticket does not exist (D-054). NI-2
+  and NI-4 check every run.
+- **NI-3** (a declassification rule was consulted and constrained the effects) applied in 29% of
+  shape pairs, against 46% at Gate 2. D-054 is the reason: plain reads of operator-named tickets
+  became trusted, so fewer runs reach a rule. For grammar pairs it was 3%.
+- **NI-5** (an approved action set executes exactly as approved) only has something to check when
+  approval is requested: 8.7% of shape examples and 0.4% of grammar examples.
+
+### Mutant detection: would the tests notice a broken kernel?
+
+Each *mutant* disables one mechanism the design relies on, for example "the policy ignores the
+program-counter label" or "the ownership rule forgets its once-per-ticket check". The harness
+must report a violation for every mutant.
+
+**Correction to earlier gate reports.** Mutant results before 2026-10-31 depended on process
+state (D-056). The test framework (Hypothesis 6.170.13) draws about 5% of its integers and
+strings from literals harvested from whatever local modules the process had loaded. So whether a
+given run caught a mutant depended on what else was imported. The example database was not
+involved.
+- Every earlier "the harness catches mutant X" claim held in the process that ran it. None was
+  shown from a clean state: Gate 1 and Gate 2 reports, D-033, D-049, D-054.
+- Generation is now pinned, every measurement runs in a fresh process with an explicit seed, and
+  every mutant below is re-established from that clean state.
+
+**Detections come in bursts.** Within one seed, detections arrive in bursts separated by long
+gaps. The variance-to-mean ratio per 250-example window is 4–6, where independent examples would
+give about 1. The cause is that Hypothesis builds new examples from earlier ones; the share of
+large plans is flat after the first ~50 examples (D-056).
+
+So one long run cannot support a miss probability. The claim is made across independent seeds
+(D-058):
+- each mutant runs at k seeds of n examples, and is caught if any seed catches it;
+- `q` is the probability that one seed catches it within n. It is estimated from 8 measured
+  seeds per mutant, using the exact one-sided 95% lower bound;
+- k is chosen so the estimated miss probability `(1 − q_low)^k` is at most 1%.
+
+| plan source | mutants that must be caught | k × n | estimated miss |
+|---|---|---|---|
+| fixed adversarial shapes | all 16 (11 single-run, 4 multi-run, 1 NI-5) | from 4 × 250 to 14 × 1,000 | ≤ 1% each |
+| grammar (random well-typed plans) | the 4 it catches on its own | from 4 × 500 to 22 × 250 | ≤ 1% each |
+
+The per-mutant table is in DECISIONS D-058.
+
+**Limits of the mutant evidence.**
+- **The estimate is not a measured bound.** Eight seeds per mutant limit `q_low` to at most 0.69,
+  and n was chosen on the same seeds.
+- **One stage-b miss is kept on record:** the NI-5 mutant was missed by one seed's 8,000-example
+  run and first caught at 9,080. That seed is why NI-5 needs 14 seeds.
+- **The shape generator was adjusted while known mutants were being measured** (D-049 to D-056).
+  So "every known mutant is caught" is weaker evidence than the numbers suggest. For that reason
+  a separate reviewer wrote new mutants without seeing the generator or the mutant list (D-057);
+  their result is reported separately in the Gate 3 report.
+- **What `check` runs:** each mutant's earliest recorded detection, replayed exactly. That is a
+  regression check, not the detection claim. The k-seed designs run in an owner-run script
+  (`phase3-run --stage c`).
+
+**What the random-plan (grammar) generator catches on its own** (5 rate seeds × 1,000 examples,
+plus 3 stage-b seeds at 4,000):
+
+| mutant | caught alone? |
+|---|---|
+| policy ignores pc; map body pc ignores list structure; extractor output labelled trusted | yes: pure labelling mutants that need no declassification rule |
+| point read of a missing trusted ticket does not halt | yes |
+| goodwill rule ignores origin set | at 2 of 3 stage-b seeds, 0 of 5 rate seeds: a coverage gap |
+| filter ignores predicate labels | at 1 of 8 seeds: a coverage gap |
+| `at` ignores index label; extraction ignores control | no |
+| ownership rule (2 mutants), goodwill amount; all 4 multi-run mutants; NI-5 | no |
+
+The grammar generator was never expected to reach the declassification rules, multi-run state or
+approvals (D-053). It is a second, independent source of plans for the labelling rules; the
+hand-written shapes cover the rest.
 
 ## Findings carried into this phase
 

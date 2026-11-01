@@ -67,11 +67,13 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 - `eval --suite holdout` / `sweep --suite holdout`: the same against the held-out injections
   (`evals/tasks/holdout/`, independent red-team agent, D-043); writes `results/holdout.json`,
   `results/audit_holdout.sqlite`, `results/cap_sweep_holdout.json`. Never tune against it.
-- `phase3-run --out DIR [--stage a|b|rates] [--resume]`: the owner-run Phase 3 measurements
+- `phase3-run --out DIR [--stage a|b|c|rates] [--resume]`: the owner-run Phase 3 measurements
   (`scripts/phase3_run.py`). Stage a (done at 6e27f60): check, mutants, NI statistics, chunked
   fuzz, both evals, both sweeps. Stage rates: clean-state per-mutant detection counts, 5 seeds x
   1,000 examples (`scripts/mutant_rates.py rates`). Stage b: check, `mutant_rates.py verify` at
-  the budgets, NI statistics for the six split properties, grammar fuzz chunks. Refuses a dirty
+  the budgets, NI statistics for the six split properties, grammar fuzz chunks (done at c4b52a6).
+  Stage c: check, then every required mutant at its k-seed design (`mutant_rates.py kseed`,
+  D-058). `mutant_rates.py heldout` runs the Gate 3 held-out mutants (D-057). Refuses a dirty
   tree; logs each step to `DIR/steps.jsonl` and `DIR/NN-<step>.log`; continues past failures.
   Run only outside a session, from a clean worktree (DECISIONS "Phase 3 owner run", D-056).
 - `eval-llm`: evaluation with the local model. Phase 4, not yet.
@@ -86,17 +88,14 @@ mutant step failed, diagnosed in D-056: mutant results depended on Hypothesis's 
 constants pool (process state), not on the example database. Fixed by pinning generation
 (`tests/determinism.py`), explicit seeds, and NI properties split by plan source.
 
-Stage rates is verified and the budgets, `GRAMMAR_CATCHES` and the check witnesses are set
-(D-056 "Rates"; the budget rule deviates from the pre-registered one, recorded there).
+Stages rates and b are verified (DECISIONS "stage b results"). Mutant detection is now k
+independent seeds per mutant (D-058, the owner's final redesign; no further iteration). RESULTS
+has its NI section.
 
-Next, in order:
-1. Owner runs `phase3-run --stage b` from a clean worktree at the committed head (command in the
-   latest status message).
-2. Verify it: every budget at three fresh seeds; misses and corrected budgets go in a separate
-   D-056 table (one NI-5 miss is already known, D-056 "Validation"). Fill the RESULTS NI section.
-3. Gate 3: the independent review (D-054 test table row by row, and every mutant claim in
-   earlier gate reports: D-033, D-049, D-050, D-054, Gate 1/2 reports), plus the held-out
-   mutants (D-057: a reviewer that sees only DESIGN.md and kernel/ writes 3-5 mutants, run at
-   the set budgets, reported separately, no generator change first). Post the report, stop.
+Next: Gate 3. The independent review (threat model, design, code; D-054 test table row by row;
+every earlier mutant claim re-checked), and the held-out mutants (D-057: written by a reviewer
+that sees only DESIGN.md and kernel/, run with `mutant_rates.py heldout`, reported separately,
+no generator change first). Post the SPEC §9 report and stop. The owner-run stage c command
+goes in the report.
 
 Never run the fuzz or the owner-run stages inside a session. `check` takes about 1 min.
