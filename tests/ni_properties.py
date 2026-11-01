@@ -136,12 +136,16 @@ def check_ni4(r: RunResult, pre: sqlite3.Connection) -> None:
     if r.outcome not in ("executed", "partial", "indeterminate"):
         return
     by_ticket: dict[tuple[str, int], int] = {}
+    credits_to: dict[int, int] = {}  # credits per customer in this run (Gate 3 review #6)
     for a in r.actions:
-        key = (a.tool, int(a.canonical_args().get("ticket_id", -1)))
+        args = a.canonical_args()
+        key = (a.tool, int(args.get("ticket_id", -1)))
         by_ticket[key] = by_ticket.get(key, 0) + 1
+        if a.tool == "issue_credit":
+            credits_to[int(args["customer_id"])] = credits_to.get(int(args["customer_id"]), 0) + 1
     for a, v in zip(r.actions, r.verdicts, strict=True):
         if v.rule == GOODWILL:
-            _check_goodwill(a.canonical_args(), pre, by_ticket)
+            _check_goodwill(a.canonical_args(), pre, by_ticket, credits_to)
         if v.rule != OWNERSHIP:
             continue
         args = a.canonical_args()
@@ -163,7 +167,10 @@ def check_ni4(r: RunResult, pre: sqlite3.Connection) -> None:
 
 
 def _check_goodwill(
-    args: dict[str, Any], pre: sqlite3.Connection, by_ticket: dict[tuple[str, int], int]
+    args: dict[str, Any],
+    pre: sqlite3.Connection,
+    by_ticket: dict[tuple[str, int], int],
+    credits_to: dict[int, int],
 ) -> None:
     """ticket_goodwill_credit: the standard amount, to the ticket's own customer,
     for an allowed reason, once per ticket and once per customer."""
@@ -183,5 +190,7 @@ def _check_goodwill(
         problems.append("customer already had a credit")
     if by_ticket[("issue_credit", ticket)] != 1:
         problems.append("more than one credit for the ticket in this run")
+    if credits_to[customer] != 1:
+        problems.append("more than one credit for the customer in this run")
     if problems:
         raise NIViolation(f"NI-4 goodwill postcondition failed for {args}: {problems}")
