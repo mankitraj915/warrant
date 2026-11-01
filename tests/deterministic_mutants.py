@@ -14,6 +14,7 @@ from typing import Any
 
 import kernel.declassify
 import kernel.execution
+import kernel.policy
 from kernel.labels import cell_origin
 from kernel.tools.database import EXISTS, Database
 from kernel.values import ListV, Record, Scalar
@@ -50,4 +51,6 @@ DETERMINISTIC_MUTANTS: dict[str, tuple[Any, str, Any]] = {
         "_case_ticket_origins",
         _origins_without_row,
     ),
+    # Gate 3 review #5: NI checks integrity only, so the P5 sink check is covered here.
+    "sink check removed": (kernel.policy, "_sink_block_reason", lambda action, reader: None),
 }

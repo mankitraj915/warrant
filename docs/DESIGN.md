@@ -693,6 +693,11 @@ exception in either run fails the test.
   extracts under a note- or existence-selected `pc`; a trusted refund on the case customer's
   second ticket followed by rule-path refunds on the case ticket; `order_stats` in `pc` and
   arguments; and `incident_orders` under a trusted `pc` and under a ticket read.
+  The `order_stats` shapes exercise label propagation only. The NI properties are integrity
+  properties, and an aggregate carries `U = ∅`, so they cannot see a confidentiality (P5 sink)
+  violation; removing the sink check goes unnoticed by every NI property (Gate 3 review #5).
+  P5 is covered by deterministic tests instead, marked with the "sink check removed" mutant
+  (`tests/test_tools_phase2.py`, D-065).
 - Environment mutations rewrite untrusted cells, add a ticket opened by another customer, add
   a second ticket for the case customer, or delete the case ticket. `customers.display_name`
   is mutated, but no tool reads it, so those mutations have no effect. Their values are drawn to be dangerous: IDs of the same
@@ -709,9 +714,12 @@ exception in either run fails the test.
   against the shapes properties, and the grammar properties run the mutants the grammar catches
   on its own. A mutant counts as caught only from a clean state: an explicit seed, no example
   database, and Hypothesis's generation pinned to the seed (`tests/determinism.py`, D-056). The
-  execution
-  pre-pass has no mutant: the harness has no concurrent writer, so it is covered by regression
-  tests only.
+  execution pre-pass has no mutant: the harness has no concurrent writer, so it is covered by
+  regression tests only.
+- Deterministic mutants (`tests/deterministic_mutants.py`, D-063) cover checks the NI harness
+  cannot reach: the re-check stopping on a stricter verdict, the existence origin on
+  untrusted-id reads and in the rules' origin set, and the P5 sink check. Each is caught by
+  tests marked `harness_gap("<mutant>")`, and `check` re-proves every kill.
 - `tasks.py check` runs a derandomized profile; `tasks.py fuzz` runs the `fuzz` profile. Neither
   uses an example database. Shrunk
   counterexamples become `@example` regression tests.
