@@ -2820,3 +2820,29 @@ bodies. That is sound. Its cost to multi-ticket plans is unmeasured.
   the NI-5 mutant, and the owner reserved any weakening of a test.
 
 No test: documentation only. Nothing in the kernel or the harness changes.
+
+## D-069 What the NI harness does not compare or generate, stated (2026-11-02; Gate 3 finding 9, issue #9)
+
+**Problem.**
+- The Gate 3 reviewer listed what a passing NI run does not cover: the observations that
+  are not compared, the inputs that are not generated, and NI-1's vacuity on halted pairs.
+  None of this was stated in DESIGN.
+- DESIGN §9.2 said effects are compared "in execution order". `effects()` actually groups
+  them by table: refunds, then credits, then closures.
+
+**Decision.**
+- DESIGN §9.2 now describes `effects()` as it is.
+- DESIGN §9.4 has a "Limits of the harness" list, giving where each item is covered instead,
+  if anywhere.
+- The vacuity figure cites the recorded stage-a statistics (27% of shapes pairs, 16% of
+  grammar pairs) rather than the reviewer's rounded "about 26%".
+
+**Rejected.** *Comparing the durable audit row in NI-2 instead of the in-memory rule log.*
+- It would close one listed gap. But the audit row is serialized from the same `RunResult`,
+  so the comparison mostly re-tests `json.dumps`.
+- `tests/test_audit.py` already checks that rule decisions reach the audit row.
+
+Several listed gaps are addressed elsewhere: concurrency (D-061, D-063), untrusted ticket ids
+(#13), and provider failures in paired runs (D-068, after v1).
+
+No test: documentation only.

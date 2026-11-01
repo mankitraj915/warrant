@@ -627,7 +627,10 @@ cumulative label (§3).
   projection `π(D)`, which applies each rule's `π_R` to its decisions (§6.1);
 - `Req(P,E)`: approval requests as canonical sets;
 - `X(P,E,Ap)`: executed effects, read from the payment provider's log and the consequential DB
-  writes, in execution order. Comparing ordered lists is stronger than the spec's multiset.
+  writes. The harness (`tests/ni_properties.py::effects`) groups them by table: refunds, then
+  credits, then closures, each in execution order. Comparing these ordered lists is stronger
+  than the spec's multiset, but it does not compare the interleaving across tools (Gate 3
+  review #9).
 
 ### 9.3 Properties (for every well-typed `P` and every `E1 ~ E2`)
 
@@ -745,6 +748,28 @@ exception in either run fails the test.
   cannot reach: the re-check stopping on a stricter verdict, the existence origin on
   untrusted-id reads and in the rules' origin set, and the P5 sink check. Each is caught by
   tests marked `harness_gap("<mutant>")`, and `check` re-proves every kill.
+- **Limits of the harness** (Gate 3 review #9). A passing NI run says nothing about these.
+  - *Not compared:*
+    - approval requests (by design: steering is recorded, §9.3);
+    - the durable audit row: NI-2 reads the in-memory rule log, so "the decision was logged"
+      is checked against the audit table only by `tests/test_audit.py`;
+    - pending refund rows;
+    - the interleaving of effects across tools (§9.2).
+  - *Not generated:*
+    - concurrency of any kind: the run lock (§10) and the re-check have deterministic tests
+      only;
+    - an approver that approves under NI-3, which runs with deny only;
+    - extractors with state across runs;
+    - untrusted ticket ids (D-064);
+    - provider failures in paired runs (§9.3);
+    - a rule-admitted action alongside a halt elsewhere in the plan, where the halt is the
+      only difference.
+  - *Vacuity:*
+    - NI-1 is skipped for every pair in which a run halts: 27% of shapes pairs and 16% of
+      grammar pairs, single-run property (DECISIONS, "Halts and NI-checked shares",
+      stage-a statistics). A kernel that halts more often would pass NI-1 more easily. That
+      is safe for effects, but it narrows what NI-1 measures.
+    - The fraction is printed with every run.
 - `tasks.py check` runs a derandomized profile; `tasks.py fuzz` runs the `fuzz` profile. Neither
   uses an example database. Shrunk
   counterexamples become `@example` regression tests.
