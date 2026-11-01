@@ -2719,3 +2719,46 @@ direct call states the property (Ω_T includes `@row`) without a contrived scena
 inputs and observations that include customer-facing effects. It would be the principled
 check, but it is a new property outside SPEC §5, so it is out of v1 scope; it is recorded
 for later. The two deterministic tests check the policy rule the property would rest on.
+
+## D-066 NI-4's goodwill oracle counts credits per customer within a run (2026-11-02; Gate 3 finding 6, issue #6)
+
+**Problem.**
+- `_check_goodwill` checked the per-customer bound only against the state before the run;
+  within the run it counted credits per ticket. Two admitted standard credits to one
+  customer, on two of their tickets, passed NI-4.
+- The reviewer's mutant that drops the rule's in-run per-customer check was not caught at
+  3 seeds × 1,500 examples.
+- With the execution re-check also disabled, two automatic credits executed, and NI-2 and
+  NI-4 both passed.
+- Since D-062, the policy's P6 also enforces the bound. The oracle is the independent check
+  on all of these defences.
+
+**Decision.**
+- `check_ni4` now counts `issue_credit` actions per customer in the run, and `_check_goodwill`
+  requires exactly one for a rule-admitted credit.
+- `tests/test_ni_oracles.py` hands the oracle two admitted credits to one customer and
+  requires `NIViolation`. On the old oracle it passes silently.
+
+**The base-commit job (refines D-060/D-063).**
+- The job used to copy every changed file under `tests/` onto base. Here that would have
+  copied the fixed oracle, and the test would have passed on base.
+- It now takes from HEAD only:
+  - added files;
+  - modified `test_*.py`;
+  - `conftest.py` and `deterministic_mutants.py`, the infrastructure the job itself uses.
+- Other modified helpers (`ni_properties.py`, `support.py`) stay at base, because a change to
+  an oracle is the code under test.
+- A new test that needs a helper function added in the same change errors on base, and
+  ERROR counts as failing. That was already the case and remains a known weakness.
+
+**Rejected.**
+- *A harness-gap marker with an oracle mutant.* The oracle fix is itself the change, so the
+  honest evidence is the old oracle failing the test, which the narrowed copy rule now gives.
+- *Generating two-ticket credit plans in the shapes.* The reviewer's side observation
+  explains why it would not help: the cumulative extraction label makes the second
+  text-triggered credit inadmissible anyway. A direct oracle test pins the oracle's
+  behaviour without relying on a generator to reach it.
+
+**Side observation, recorded.** With text-triggered credits on two tickets in one plan, the
+second credit is never admissible: the run's cumulative extraction label mixes both tickets'
+bodies. That is sound. Its cost to multi-ticket plans is unmeasured.

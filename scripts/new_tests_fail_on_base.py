@@ -3,9 +3,14 @@
 A regression test is evidence of a fix only if it fails without the fix. This
 script collects test ids at HEAD and at ``--base``; the new ids are those at HEAD
 only. It checks the base commit out in a temporary worktree, copies HEAD's
-version of every changed file under ``tests/`` over it, and runs only the new
-tests there, with this environment's interpreter (so the base commit's code and
-HEAD's tests). It compares commits, so commit before running it locally.
+test files over it, and runs only the new tests there, with this environment's
+interpreter (so the base commit's code and HEAD's tests). It compares commits, so
+commit before running it locally.
+
+HEAD's test files are: every added file under ``tests/``, and every modified
+``test_*.py``, ``conftest.py`` and ``deterministic_mutants.py``. Other modified
+helpers (the NI oracles in ``ni_properties.py``, ``support.py``) stay at base:
+when a change fixes an oracle, the oracle is the code under test (D-066).
 
 Every new test must fail on base: a FAILED or ERROR result, or not being
 collectable there (for example because it imports a name the fix adds). A new
@@ -66,6 +71,20 @@ def outcomes(cwd: Path, ids: list[str], mutant: str | None = None) -> dict[str, 
     return found
 
 
+INFRASTRUCTURE = ("conftest.py", "deterministic_mutants.py")
+
+
+def _test_files(base: str) -> list[str]:
+    """Files under tests/ to take from HEAD: added files, and modified test modules
+    and test infrastructure. Modified helpers such as oracles stay at base."""
+    added = git("diff", "--name-only", "--diff-filter=A", base, "HEAD", "--", "tests").split()
+    modified = git("diff", "--name-only", "--diff-filter=M", base, "HEAD", "--", "tests").split()
+    keep = [
+        m for m in modified if Path(m).name.startswith("test_") or Path(m).name in INFRASTRUCTURE
+    ]
+    return added + keep
+
+
 def _name(node: str) -> str:
     return node.split("::")[-1].split("[")[0]
 
@@ -86,8 +105,7 @@ def main(argv: list[str]) -> int:
         tree = Path(tmp) / "base"
         git("worktree", "add", "--detach", str(tree), base)
         try:
-            changed = git("diff", "--name-only", "--diff-filter=AM", base, "HEAD", "--", "tests")
-            for name in changed.split():
+            for name in _test_files(base):
                 (tree / name).parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(ROOT / name, tree / name)
             results = outcomes(tree, regression)
