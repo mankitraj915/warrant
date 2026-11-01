@@ -78,7 +78,9 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
   tree; logs each step to `DIR/steps.jsonl` and `DIR/NN-<step>.log`; continues past failures.
   Run only outside a session, from a clean worktree (DECISIONS "Phase 3 owner run", D-056).
 - CI (D-060): `.github/workflows/check.yml` (every PR), `new-tests-fail-on-base.yml`
-  (`scripts/new_tests_fail_on_base.py --base <commit>`, also runnable locally), and the manual
+  (`scripts/new_tests_fail_on_base.py --base <commit>`, also runnable locally after committing;
+  a `@pytest.mark.harness_gap("<mutant>")` test must instead fail on base under its mutant from
+  `tests/deterministic_mutants.py`, D-063), and the manual
   `owner-stages.yml` (`gh workflow run owner-stages.yml -f stage=d`), which uploads results.
 - `eval-llm`: evaluation with the local model. Phase 4, not yet.
 - `report`: regenerate `docs/RESULTS.md`. Phase 5, not yet.

@@ -2618,3 +2618,47 @@ change has not been measured until then.
   needs approval three times, and one credit in total. On base, four executions.
 - `test_two_trusted_credits_to_one_customer_in_one_set_need_approval`: two operator-stated
   credits to one customer in one set. On base, both are ALLOWed.
+
+## D-063 Harness-gap tests and deterministic mutants (2026-11-02; Gate 3 finding 3, issue #3)
+
+**Problem.**
+- The between-effects re-check stops a run whose later action became stricter. No test
+  exercised that half. With `_STRICTNESS` all 0 ("never stops"), the whole suite passed
+  (229 of 229 in the reviewer's run), and the reviewer's probe paid order 7001 twice.
+- The kernel's behaviour was already correct; the gap was the tests'. Findings 4–6 have the
+  same shape.
+- A test of already-correct code cannot fail on the commit before it, so D-060's
+  new-tests-fail-on-base job would reject exactly the tests these findings ask for.
+
+**Decision.**
+- **Mutant registry.** `tests/deterministic_mutants.py` names mutants that deterministic
+  tests, not fuzzing, must catch. The first is "re-check never stops".
+- **Marker.** A test marked `@pytest.mark.harness_gap("<mutant>")` covers already-correct
+  code. `tests/conftest.py` registers the marker and, when `WARRANT_MUTANT` is set, runs
+  marked tests under their mutant (`*` means each test's own mutant).
+- **The job.** `scripts/new_tests_fail_on_base.py` now judges three kinds of new test:
+  - regression tests must fail on base, as before;
+  - `harness_gap` tests must fail on base *with their mutant applied*;
+  - `test_harness_catches_*` tests (mutant-detection tests, which pass on any commit with
+    both the code and the detecting test) are listed but not judged.
+  The marker and the name are visible in every diff, and the job prints each category.
+- **Inside `check`.** `test_harness_catches_deterministic_mutant` re-proves the kill on every
+  run: in a fresh process, under each mutant, every test marked with it must fail.
+- **Tests** (`tests/test_midrun_recheck.py`), two marked tests:
+  - *The reviewer's probe.* While 7000 is at the provider, a writer outside the kernel refunds
+    7001. That writer is out of scope since D-061, but the check must still hold.
+  - *An in-scope variant.* Another party adds a paid order for the customer mid-run. 7000 is
+    then no longer the unique eligible order, so the ownership rule declines, the second
+    refund needs approval, and the run stops as `partial`.
+  Under the mutant both runs report `executed`. The in-scope variant matters because the run
+  lock (D-061) made outside refund writers out of scope; new orders are not.
+
+**Rejected.**
+- *A blanket opt-out marker for the job.* It would let any test skip the base-commit check
+  without evidence. A harness-gap test still has to fail somewhere: under a named mutant.
+- *Adding the mutant to the NI fuzz registries.* The NI harness cannot produce a stricter
+  verdict mid-run (the reviewer's analysis), so the fuzz properties could never catch it.
+  The point is a test that does.
+- *An extension-point flag in `kernel/execution.py`* (like `PENDING_FIRST`). The table
+  `_STRICTNESS` is already the natural mutation point, and a new flag would add kernel code
+  only for tests.

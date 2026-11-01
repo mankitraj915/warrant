@@ -1,4 +1,4 @@
-"""Test-wide configuration: network blocking and Hypothesis profiles.
+"""Test-wide configuration: network blocking, Hypothesis profiles, marked mutants.
 
 The network guard (evals/netguard.py) is installed when this conftest is
 registered, before any test module is imported.
@@ -16,8 +16,10 @@ fixed empty one before any test runs.
 
 import os
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
+import pytest
 from hypothesis import settings
 
 from evals.netguard import NetworkAccessError, block_network
@@ -28,8 +30,32 @@ pin_generation()
 __all__ = ["NetworkAccessError"]
 
 
-def pytest_configure() -> None:
+def pytest_configure(config: pytest.Config) -> None:
     block_network()
+    config.addinivalue_line(
+        "markers",
+        "harness_gap(mutant): covers already-correct code; must fail under the named"
+        " mutant from tests/deterministic_mutants.py (D-063)",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _apply_marked_mutant(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[None]:
+    """With ``WARRANT_MUTANT`` set, run each ``harness_gap`` test under its mutant
+    (``*``: every marked test's own; a name: only tests marked with it, others skip)."""
+    wanted = os.environ.get("WARRANT_MUTANT")
+    marker = request.node.get_closest_marker("harness_gap")
+    if wanted and marker is not None:
+        from tests.deterministic_mutants import DETERMINISTIC_MUTANTS
+
+        name = marker.args[0]
+        if wanted not in ("*", name):
+            pytest.skip(f"under mutant {wanted!r}; this test targets {name!r}")
+        module, attribute, replacement = DETERMINISTIC_MUTANTS[name]
+        monkeypatch.setattr(module, attribute, replacement)
+    yield
 
 
 def _peak_rss_mb() -> float:
