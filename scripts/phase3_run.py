@@ -46,7 +46,11 @@ at its k-seed design (k fresh seeds of n examples, caught if any seed catches it
 ``mutant_rates.py kseed``), then ``mutant-heldout``: the Gate 3 held-out mutants
 (D-057) at ``HELDOUT_DESIGN`` (``mutant_rates.py heldout``; reported, never required).
 
-Usage: ``python scripts/tasks.py phase3-run --out <dir> [--stage a|b|c|rates] [--resume]``.
+Stage ``d`` (``--stage d``; after the Gate 3 fixes): ``check``; the k-seed designs and
+the (former) held-out mutants at fresh seeds from ``STAGE_D_SEED_BASE``, with no
+re-estimation; the dev and holdout evaluations and both sweeps.
+
+Usage: ``python scripts/tasks.py phase3-run --out <dir> [--stage a|b|c|d|rates] [--resume]``.
 """
 
 import argparse
@@ -75,6 +79,26 @@ def git(*args: str) -> str:
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
 
 
+def eval_and_sweep_steps(out: Path) -> list[tuple[str, list[str], dict[str, str], list[str]]]:
+    found: list[tuple[str, list[str], dict[str, str], list[str]]] = []
+    for suite, audit in (("dev", "audit.sqlite"), ("holdout", "audit_holdout.sqlite")):
+        cmd = [
+            PY,
+            "-m",
+            "evals.harness",
+            "--suite",
+            suite,
+            "--out",
+            str(out / f"eval_{suite}.json"),
+        ]
+        found.append((f"eval-{suite}", cmd, {}, [audit]))
+    for suite in ("dev", "holdout"):
+        cmd = [PY, "-m", "evals.sweep", "--suite", suite]
+        cmd += ["--out", str(out / f"cap_sweep_{suite}.json")]
+        found.append((f"sweep-{suite}", cmd, {}, []))
+    return found
+
+
 def steps(out: Path) -> list[tuple[str, list[str], dict[str, str], list[str]]]:
     """(name, command, extra environment, files to copy from results/ into out)."""
     stats_env = {"HYPOTHESIS_PROFILE": "fuzz", "WARRANT_FUZZ_EXAMPLES": "2000"}
@@ -99,21 +123,7 @@ def steps(out: Path) -> list[tuple[str, list[str], dict[str, str], list[str]]]:
         cmd += ["--log", str(out / "fuzz_chunks_phase3.jsonl"), "--test", test]
         cmd += ["--base-seed", str(seed)]
         found.append((f"fuzz-chunks-{name}", cmd, {}, []))
-    for suite, audit in (("dev", "audit.sqlite"), ("holdout", "audit_holdout.sqlite")):
-        cmd = [
-            PY,
-            "-m",
-            "evals.harness",
-            "--suite",
-            suite,
-            "--out",
-            str(out / f"eval_{suite}.json"),
-        ]
-        found.append((f"eval-{suite}", cmd, {}, [audit]))
-    for suite in ("dev", "holdout"):
-        cmd = [PY, "-m", "evals.sweep", "--suite", suite]
-        cmd += ["--out", str(out / f"cap_sweep_{suite}.json")]
-        found.append((f"sweep-{suite}", cmd, {}, []))
+    found += eval_and_sweep_steps(out)
     return found
 
 
@@ -168,6 +178,24 @@ def steps_c(out: Path) -> list[tuple[str, list[str], dict[str, str], list[str]]]
     ]
 
 
+# Stage d (after the Gate 3 fixes): fresh seeds, never used to estimate a design.
+STAGE_D_SEED_BASE = 202619000
+
+
+def steps_d(out: Path) -> list[tuple[str, list[str], dict[str, str], list[str]]]:
+    seeds = ["--seed-base", str(STAGE_D_SEED_BASE)]
+    kseed = [PY, "scripts/mutant_rates.py", "kseed", "--resume", *seeds]
+    kseed += ["--out", str(out / "mutant_kseed.jsonl")]
+    heldout = [PY, "scripts/mutant_rates.py", "heldout", "--resume", *seeds]
+    heldout += ["--out", str(out / "mutant_postfix.jsonl")]
+    return [
+        ("check", [PY, "scripts/tasks.py", "check"], {}, []),
+        ("mutant-kseed", kseed, {}, []),
+        ("mutant-postfix-heldout", heldout, {}, []),
+        *eval_and_sweep_steps(out),
+    ]
+
+
 def passed(log: Path) -> set[str]:
     if not log.exists():
         return set()
@@ -179,7 +207,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--resume", action="store_true")
-    parser.add_argument("--stage", choices=["a", "b", "c", "rates"], default="a")
+    parser.add_argument("--stage", choices=["a", "b", "c", "d", "rates"], default="a")
     args = parser.parse_args(argv)
     if git("status", "--porcelain"):
         print("refusing to run: the working tree is not clean (commit or use a clean worktree)")
@@ -193,7 +221,9 @@ def main(argv: list[str]) -> int:
     out.mkdir(parents=True, exist_ok=True)
     done = passed(log)
     failures = 0
-    plan = {"a": steps, "b": steps_b, "c": steps_c, "rates": steps_rates}[args.stage](out)
+    plan = {"a": steps, "b": steps_b, "c": steps_c, "d": steps_d, "rates": steps_rates}[args.stage](
+        out
+    )
     for i, (name, cmd, env, copies) in enumerate(plan, 1):
         if name in done:
             print(f"[{i}/{len(plan)}] {name}: already passed, skipped", flush=True)

@@ -67,15 +67,19 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 - `eval --suite holdout` / `sweep --suite holdout`: the same against the held-out injections
   (`evals/tasks/holdout/`, independent red-team agent, D-043); writes `results/holdout.json`,
   `results/audit_holdout.sqlite`, `results/cap_sweep_holdout.json`. Never tune against it.
-- `phase3-run --out DIR [--stage a|b|c|rates] [--resume]`: the owner-run Phase 3 measurements
+- `phase3-run --out DIR [--stage a|b|c|d|rates] [--resume]`: the owner-run Phase 3 measurements
   (`scripts/phase3_run.py`). Stage a (done at 6e27f60): check, mutants, NI statistics, chunked
   fuzz, both evals, both sweeps. Stage rates: clean-state per-mutant detection counts, 5 seeds x
   1,000 examples (`scripts/mutant_rates.py rates`). Stage b: check, `mutant_rates.py verify` at
   the budgets, NI statistics for the six split properties, grammar fuzz chunks (done at c4b52a6).
   Stage c: check, then every required mutant at its k-seed design (`mutant_rates.py kseed`,
-  D-058). `mutant_rates.py heldout` runs the Gate 3 held-out mutants (D-057). Refuses a dirty
+  D-058). `mutant_rates.py heldout` runs the Gate 3 held-out mutants (D-057). Stage d: check,
+  k-seed and former held-out mutants at fresh seeds (`--seed-base`), evals, sweeps. Refuses a dirty
   tree; logs each step to `DIR/steps.jsonl` and `DIR/NN-<step>.log`; continues past failures.
   Run only outside a session, from a clean worktree (DECISIONS "Phase 3 owner run", D-056).
+- CI (D-060): `.github/workflows/check.yml` (every PR), `new-tests-fail-on-base.yml`
+  (`scripts/new_tests_fail_on_base.py --base <commit>`, also runnable locally), and the manual
+  `owner-stages.yml` (`gh workflow run owner-stages.yml -f stage=d`), which uploads results.
 - `eval-llm`: evaluation with the local model. Phase 4, not yet.
 - `report`: regenerate `docs/RESULTS.md`. Phase 5, not yet.
 - `demo`: scripted demonstration. Phase 5, not yet.
