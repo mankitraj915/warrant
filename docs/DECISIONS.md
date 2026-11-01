@@ -2280,3 +2280,108 @@ Rejected:
 - *Wilson bound:* with 8 of 8 it gives about 0.68, close to Clopper–Pearson. The exact bound
   avoids arguing about approximations at small m.
 - *Measuring more seeds first to shrink k:* the owner asked for no further iteration.
+
+## Gate 3 independent review: responses (2026-11-01)
+
+**The reviewer.** A fresh subagent, given `docs/THREAT_MODEL.md`, `docs/DESIGN.md`, `docs/SPEC.md`,
+the code and the earlier review files. For the two owner-requested checks it also got three
+extracts: the D-054 test table, the earlier mutant decisions (D-033, D-049, D-050, D-054), and the
+clean-state evidence (stage b and D-058). It did not get evaluation results or the rest of this
+log. The report is verbatim in `docs/reviews/GATE3_REVIEW.md` (commit 6fd8e31).
+- It disclosed that a grep showed it four lines of `tests/heldout_mutants.py`. It did not use
+  them.
+
+**Reproduced by me.** I reran the reviewer's deterministic probes (session scratchpad
+`gate3/rev/`):
+- the recovery race (finding 1): order 7000 refunded twice, no refund row after run 1;
+- the D-054 probe F (finding 2): four executed credits for customer 100;
+- the stricter-stop probe (finding 3): `partial` on the real kernel;
+- the reviewer's never-stops mutant, applied as a pytest plugin to the whole suite except
+  `test_ni_mutants.py`: **229 passed**, so no test notices it;
+- findings 6 and 7: the approver exception (no audit row, then an IntegrityError on retry), the
+  escaped leaked-ticket halt, and the in-run per-customer credit bound backstopped by the
+  re-check (`partial`, one credit).
+
+One assertion in the reviewer's `test_inrun_customer_bound.py` expects `executed` under the
+single mutant and fails (`partial`). Its own report says the re-check backstops this case, so
+the report is right and that assertion is stale.
+
+**Nothing is fixed before the owner's decision.** Findings 1–3 change the kernel or its stated
+concurrency model, which is a direction decision. Proposed responses:
+
+| # | finding | severity | proposed response |
+|---|---|---|---|
+| 1 | `recover()` in a concurrent run deletes another run's in-flight pending row; the record is lost and the rule admits a second refund | high | **Real; reproduced.** DESIGN never states single-writer. Serialize runs on one database with a run lock taken before `recover()` and held through execution. Check the rowcount of the `provider_ref` UPDATE and fail loudly when it is 0. Add the reviewer's probe as a regression test. Then state the concurrency model in DESIGN and THREAT_MODEL. |
+| 2 | Since D-054 a plain-read credit skips the goodwill rule, so the per-customer bound no longer applies; probe F executes four credits | medium | **Real; a D-054 cost the record missed.** Move the per-customer and per-ticket credit bounds into the credit's P3 checks, so they hold for trusted credits too; restore probe F's original form as a test. Correct the D-054 table row 7 (below). |
+| 3 | The "stop on a stricter verdict between effects" check is tested by nothing | medium | **Real.** Add the reviewer's mid-run probe as a regression test, and add a "re-check never stops" mutant to the suite with a deterministic test (the NI generators cannot produce a concurrent writer). |
+| 4 | Reads of untrusted ticket ids and their existence origin are no longer generated or asserted | low–medium | **Real harness gap from D-054.** Add a label unit test for the untrusted-id `@row`. The `exists` control in `_lit_extract` is dead for NI-1 (also recorded in D-056). Fix `test_case_ticket_existence_is_endorsable_by_the_rule` or rename it. |
+| 5 | NI checks integrity only; removing the P5 sink check goes unnoticed | low | **Accepted as scope:** NI is the integrity invariant. Correct DESIGN §9.4, which lists `order_stats` shapes as NI coverage, and add a sink mutant against `test_tools_phase2.py`. |
+| 6 | The NI-4 goodwill oracle has no in-run per-customer check | low | Add it to `_check_goodwill`. |
+| 7 | An approver that raises, or a leaked missing ticket, leaves no audit row | low | Audit the failure and mark the approval rejected. Nothing executes today. |
+| 8, 9 | NI-3 and NI-5 versus partial runs; what the harness does not compare or generate | low | Document them in DESIGN §9 as harness limits. Fix the "in execution order" wording in DESIGN §9.2, since `effects()` groups by table. |
+
+**D-054 test table: corrections from the review.**
+- **Row 7** (`test_goodwill_credits_are_bounded_per_customer_not_only_per_ticket`): **weaker, not
+  equal.** The original probe F (plain reads) now executes four credits. The test only covers
+  text-triggered credits.
+- **Rows 6 and 12:** their "NI-3 holds" / "NI-1-clean" calls are vacuous when one side halts. The
+  evidence is the halt assertions.
+- **Row 5's caveat:** nothing now covers the untrusted-id half of the existence origin (finding 4).
+- **Missed by the table:** `test_case_ticket_existence_is_endorsable_by_the_rule` changed meaning
+  without changing its assertions, because its input no longer reaches `@row`. The table's method,
+  which lists changed assertions, cannot see tests whose input stopped reaching the mechanism.
+
+**Earlier mutant claims** (review, 30 rows):
+- Every mutant named in D-033, D-049, D-050 and D-054 is re-established from a clean state by the
+  witnesses and the stage-b seeds.
+- Not re-established: the old budget and rate figures ("all 10 caught at 600", the D-049 rates,
+  "970 runs"). They are superseded by D-056 and D-058.
+- Two Gate 1 mutants were never in the suite: "ownership rule ignores amount" and "contains
+  ignores list labels". The reviewer reproduced both as caught; they are not part of the
+  project's evidence.
+- **Mis-specified mutants:**
+  - Both "ignores origin set" mutants also drop the rules' trust preconditions. The reviewer's
+    narrow versions are caught too (3/3).
+  - "Goodwill rule ignores amount", "map body pc", "policy ignores pc" and "extraction ignores
+    control" are broader than their names.
+  - The NI-5 reversal is caught only through its relaxation half (finding 3).
+- **Stage c (k-seed) has not run.** Every k-seed figure is a design, not a result.
+
+## Held-out mutants (D-057): result so far
+
+**Writer.** A fresh subagent that read only `docs/DESIGN.md` and `kernel/`. It reports that
+DESIGN §9.4 names the existing mutants by mechanism, so it was blind to the generator and the
+tests, but not fully to the mutant list. It deliberately avoided those mechanisms.
+
+Five mutants, in `tests/heldout_mutants.py` (commit b565630, added unchanged):
+1. **`ownership_amount_at_most_refundable`:** the ownership rule admits any amount up to the
+   refundable amount, not exactly it.
+2. **`goodwill_reason_not_required_trusted`:** the goodwill rule no longer requires a trusted
+   `reason`.
+3. **`contains_ignores_element_labels`:** `contains` takes only the list's outer label.
+4. **`order_note_labelled_trusted`:** the labelling map loses `orders.customer_note`.
+5. **`approval_hash_not_compared`:** approval consumption ignores the hash.
+
+**Run** (in session, `mutant_rates.py heldout`, `results/phase3b/heldout.jsonl`). Each mutant runs
+against NI grammar, then NI shapes, then multirun shapes, then NI-5 shapes, at
+`HELDOUT_DESIGN`, and stops at the first seed that catches it. Claude Code's memory guard stopped
+the run partway; it was not restarted in session.
+
+| mutant | result |
+|---|---|
+| ownership amount at most refundable | **caught**: NI grammar, seed 202618007, example 862 (after 6 seeds missed) |
+| goodwill reason not required trusted | **missed at every design**: NI grammar 22 × 1,000, NI shapes 22 × 2,000, multirun 22 × 1,000, NI-5 14 × 1,000 (107,000 calls) |
+| contains ignores element labels | incomplete: NI grammar 21 of 22 seeds missed when the run was stopped |
+| order note labelled trusted | not run |
+| approval hash not compared | not run |
+
+**Why the goodwill-reason miss happens** (analysed after the result; nothing changed):
+- The shapes pass every credit `reason` as a literal (`planners/fuzz.py` credit shape).
+- The grammar draws `reason` from the enum pool three times in four.
+- No payload is ever exactly `goodwill` or `late_delivery`.
+- So no generated plan has an untrusted credit reason that also passes the enum check, and the
+  mutant cannot produce a violation. **A coverage gap that no known mutant exposed.** The analogous
+  `close_ticket` resolution is drawn from text in the shapes; the credit reason is not.
+- Per D-057, the generator is not changed before this report.
+
+The complete held-out run, at one commit, is in the owner-run stage c (`mutant-heldout`).

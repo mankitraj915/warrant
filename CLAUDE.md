@@ -92,10 +92,10 @@ Stages rates and b are verified (DECISIONS "stage b results"). Mutant detection 
 independent seeds per mutant (D-058, the owner's final redesign; no further iteration). RESULTS
 has its NI section.
 
-Next: Gate 3. The independent review (threat model, design, code; D-054 test table row by row;
-every earlier mutant claim re-checked), and the held-out mutants (D-057: written by a reviewer
-that sees only DESIGN.md and kernel/, run with `mutant_rates.py heldout`, reported separately,
-no generator change first). Post the SPEC §9 report and stop. The owner-run stage c command
-goes in the report.
+**At Gate 3, waiting for the owner** (report posted 2026-11-01; DECISIONS "Gate 3 independent
+review: responses" and "Held-out mutants (D-057): result so far"). Open:
+- review findings 1-3 (recovery race, high; plain-read credit bound; untested stricter-stop),
+  proposed fixes not applied pending the owner's decision;
+- the owner-run stage c (k-seed designs and the complete held-out run) has not run.
 
 Never run the fuzz or the owner-run stages inside a session. `check` takes about 1 min.

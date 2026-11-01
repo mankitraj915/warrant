@@ -43,7 +43,8 @@ seeds (``RATE_SEEDS``). They set the stage-b budgets and the seed witnesses that
 
 Stage ``c`` (``--stage c``; D-058): ``check``, then ``mutant-kseed``: every required mutant
 at its k-seed design (k fresh seeds of n examples, caught if any seed catches it;
-``mutant_rates.py kseed``).
+``mutant_rates.py kseed``), then ``mutant-heldout``: the Gate 3 held-out mutants
+(D-057) at ``HELDOUT_DESIGN`` (``mutant_rates.py heldout``; reported, never required).
 
 Usage: ``python scripts/tasks.py phase3-run --out <dir> [--stage a|b|c|rates] [--resume]``.
 """
@@ -158,7 +159,13 @@ def steps_rates(out: Path) -> list[tuple[str, list[str], dict[str, str], list[st
 def steps_c(out: Path) -> list[tuple[str, list[str], dict[str, str], list[str]]]:
     kseed = [PY, "scripts/mutant_rates.py", "kseed", "--resume"]
     kseed += ["--out", str(out / "mutant_kseed.jsonl")]
-    return [("check", [PY, "scripts/tasks.py", "check"], {}, []), ("mutant-kseed", kseed, {}, [])]
+    heldout = [PY, "scripts/mutant_rates.py", "heldout", "--resume"]
+    heldout += ["--out", str(out / "mutant_heldout.jsonl")]
+    return [
+        ("check", [PY, "scripts/tasks.py", "check"], {}, []),
+        ("mutant-kseed", kseed, {}, []),
+        ("mutant-heldout", heldout, {}, []),
+    ]
 
 
 def passed(log: Path) -> set[str]:

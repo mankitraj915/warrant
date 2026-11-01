@@ -231,8 +231,15 @@ The per-mutant table is in DECISIONS D-058.
   run and first caught at 9,080. That seed is why NI-5 needs 14 seeds.
 - **The shape generator was adjusted while known mutants were being measured** (D-049 to D-056).
   So "every known mutant is caught" is weaker evidence than the numbers suggest. For that reason
-  a separate reviewer wrote new mutants without seeing the generator or the mutant list (D-057);
-  their result is reported separately in the Gate 3 report.
+  a separate reviewer wrote five new mutants without seeing the generator or the tests (D-057).
+  So far one was caught, and one, "the goodwill rule no longer requires a trusted credit reason",
+  was **missed at every design**: no generator ever produces an untrusted credit reason that is
+  also a valid reason. Three are not yet complete (owner-run stage c).
+- **The Gate 3 review found mechanisms the NI harness cannot see:** a concurrent run's
+  recovery deleting another run's in-flight refund record (a double refund, reproduced), the
+  execution re-check's stop on a stricter verdict (no test notices it disabled), and the
+  per-customer credit bound for plain-read credits since D-054 (DECISIONS "Gate 3 independent
+  review: responses").
 - **What `check` runs:** each mutant's earliest recorded detection, replayed exactly. That is a
   regression check, not the detection claim. The k-seed designs run in an owner-run script
   (`phase3-run --stage c`).
