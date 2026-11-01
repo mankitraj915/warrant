@@ -55,7 +55,8 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 - `fuzz-chunks`: the same fuzzing as sequential chunks with recorded seeds and measured peak
   RSS (`--test --chunks --examples --base-seed`; log in `results/fuzz_chunks.jsonl`; D-024).
 - `eval`: default offline evaluation (no LLM): dev suite (40 user tasks, 11 injections) ×
-  {warrant+oracle, warrant+gullible, undefended+gullible, leaked+gullible}, Warrant
+  {warrant+oracle, warrant+gullible, undefended+gullible, delimited+gullible, leaked+gullible,
+  undefended+attacker, delimited+attacker, leaked+attacker} (D-051, D-052), Warrant
   configurations with the simulated approver (D-041); writes `results/eval.json` (gitignored)
   and prints tables; also copies every run's audit row to `results/audit.sqlite`.
 - `trace <run_id>`: explain one run from its audit row (actions, argument provenance, verdicts,
@@ -66,16 +67,55 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 - `eval --suite holdout` / `sweep --suite holdout`: the same against the held-out injections
   (`evals/tasks/holdout/`, independent red-team agent, D-043); writes `results/holdout.json`,
   `results/audit_holdout.sqlite`, `results/cap_sweep_holdout.json`. Never tune against it.
+- `phase3-run --out DIR [--stage a|b|c|rates] [--resume]`: the owner-run Phase 3 measurements
+  (`scripts/phase3_run.py`). Stage a (done at 6e27f60): check, mutants, NI statistics, chunked
+  fuzz, both evals, both sweeps. Stage rates: clean-state per-mutant detection counts, 5 seeds x
+  1,000 examples (`scripts/mutant_rates.py rates`). Stage b: check, `mutant_rates.py verify` at
+  the budgets, NI statistics for the six split properties, grammar fuzz chunks (done at c4b52a6).
+  Stage c: check, then every required mutant at its k-seed design (`mutant_rates.py kseed`,
+  D-058). `mutant_rates.py heldout` runs the Gate 3 held-out mutants (D-057). Refuses a dirty
+  tree; logs each step to `DIR/steps.jsonl` and `DIR/NN-<step>.log`; continues past failures.
+  Run only outside a session, from a clean worktree (DECISIONS "Phase 3 owner run", D-056).
 - `eval-llm`: evaluation with the local model. Phase 4, not yet.
 - `report`: regenerate `docs/RESULTS.md`. Phase 5, not yet.
 - `demo`: scripted demonstration. Phase 5, not yet.
 
 ## Current status
 
-Phase: **3 in progress** (Gate 2 approved 2026-10-30; see DECISIONS "Gate 2 outcome" and
-"Phase 3 plan"). Gate 3 also waits for the owner-run post-fix chunked fuzz. The owner runs
-the command in DECISIONS "Gate 2 outcome" (pinned worktree `C:\Users\manki\warrant-fuzz-gate2`
-at 0905584). Afterwards, read `results/fuzz_chunks.jsonl`, verify all 60 chunks (seeds
-202610800–819, 202610900–919, 202611000–019, commit 0905584) and record them in D-050. Never
-run the fuzz inside a session (Claude Code's memory guard stops it). `check` takes about
-4 min.
+Phase: **3 in progress** (Gate 2 approved 2026-10-30). Code on branch `phase3-wip`, not merged.
+Stage a of the owner run is verified (DECISIONS "Phase 3 owner run: stage a results"); its
+mutant step failed, diagnosed in D-056: mutant results depended on Hypothesis's harvested
+constants pool (process state), not on the example database. Fixed by pinning generation
+(`tests/determinism.py`), explicit seeds, and NI properties split by plan source.
+
+Stages rates and b are verified (DECISIONS "stage b results"). Mutant detection is now k
+independent seeds per mutant (D-058, the owner's final redesign; no further iteration). RESULTS
+has its NI section.
+
+Stage c is verified and recorded as the Gate 3 baseline (DECISIONS "Gate 3 baseline"):
+every required mutant caught; held-out 2 caught, 3 missed (permanent entries in RESULTS).
+
+**Owner delegation (2026-11-02): ship v1 autonomously.** Needs the owner's explicit yes:
+(a) rewriting git history, (b) making the GitHub repo public, (c) weakening the invariant, a
+test or a policy. Every gate still gets an independent reviewer; act on its findings, record
+them in DECISIONS. Public docs (README, ADRs, WHAT_WENT_WRONG) discuss engineering only, not
+the tools used to build the project, and never claim the owner wrote code or prose by hand.
+Memory-heavy runs (fuzz, k-seed, held-out, evals at scale, models) go to owner-run commands or
+GitHub Actions, never in session. Plan and progress (tick as done):
+1. [x] 1.1 Record stage c as the Gate 3 baseline.
+2. [ ] Step 2: history scan (report; a rewrite needs the owner); merge phase3-wip into main
+   --no-ff; annotated tags gate-0..gate-3; private GitHub repo; push; releases; labels; one
+   issue per Gate 3 finding; PR template; Actions (check on PRs; tests-fail-on-base job;
+   manual owner-run-stages workflow); record runner memory and free-minute limits.
+3. [ ] Steps 1.2/1.3 as issue + branch + PR each (merge commits): findings 1-9 with
+   regression tests failing on 7da1652; generator coverage (domain-valid values in untrusted
+   fields); post-fix held-out result reported separately.
+4. [ ] Step 3 (stage d) on the fixed commit: check, k-seed at fresh seeds, post-fix held-out,
+   evals and sweeps; update RESULTS; re-review; tag gate-3 at the final commit.
+5. [ ] Step 4: v1 ships without a local LLM planner; optional CI-only small-model job.
+6. [ ] Step 5: README, docs/WHAT_WENT_WRONG.md, docs/adr/ (8-10), docs/PROCESS.md,
+   docs/STUDY_GUIDE.md, code trimming pass, `tasks.py demo` plus a committed transcript.
+7. [ ] Step 6: final skeptical review, fixes, fresh-clone reproduction, tag v1.0 and release,
+   hand-off report.
+
+Never run the fuzz or the owner-run stages inside a session. `check` takes about 1 min.

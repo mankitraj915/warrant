@@ -36,6 +36,7 @@ EVAL = [[PY, "-m", "evals.harness"]]
 SWEEP = [[PY, "-m", "evals.sweep"]]
 TRACE = [[PY, "-m", "evals.trace"]]
 FUZZ_CHUNKS = [[PY, "scripts/fuzz_chunks.py"]]
+PHASE3_RUN = [[PY, "scripts/phase3_run.py"]]
 
 TARGETS: dict[str, list[list[str]]] = {
     "lint": LINT,
@@ -44,6 +45,7 @@ TARGETS: dict[str, list[list[str]]] = {
     "check": LINT + TYPECHECK + TEST,
     "fuzz": FUZZ,
     "fuzz-chunks": FUZZ_CHUNKS,
+    "phase3-run": PHASE3_RUN,
     "eval": EVAL,
     "sweep": SWEEP,
     "trace": TRACE,

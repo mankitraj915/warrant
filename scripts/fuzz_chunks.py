@@ -96,8 +96,7 @@ def run_chunk(test: str, seed: int, examples: int) -> dict[str, object]:
         "--hypothesis-show-statistics",
         f"--hypothesis-seed={seed}",
         "-p",
-        "no:cacheprovider",
-        "-q",
+        "no:cacheprovider",  # no extra -q: with the configured -q it would hide the summary
     ]
     rss_file = Path(tempfile.mkdtemp()) / "peak_rss_mb"
     env = {

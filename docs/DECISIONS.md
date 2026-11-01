@@ -1221,6 +1221,22 @@ The fuzz evidence at 50415cb is therefore that chunk, `tasks.py check` (derandom
 examples per property, plus the mutants at 3,000/3,000/2,000) and the 2,000-example statistics
 run above.
 
+**Owner-run chunked fuzz: passed (recorded 2026-10-31).** The owner ran the command in "Gate 2
+outcome" with Claude Code closed. I checked `results/fuzz_chunks.jsonl`, keeping rows whose
+seeds fall in the three ranges:
+
+| property | chunks (seeds) | passing | failing | invalid | time | peak RSS | available memory |
+|---|---|---|---|---|---|---|---|
+| single-run NI | 20 (202610800–819) | 20,000 | 0 | 580 (2.8%) | 335 s | 95.2 MB | 765–1,040 MB |
+| multirun | 20 (202610900–919) | 20,000 | 0 | 2,425 (10.8%) | 279 s | 94.2 MB | 498–946 MB |
+| NI-5 | 20 (202611000–019) | 20,000 | 0 | 1,492 (6.9%) | 205 s | 82.4 MB | 432–802 MB |
+
+All 60 seeds are present once, every exit code is 0, and 59 rows record commit 0905584. Chunk
+202610800 is the D-050 run at 50415cb, which predates the commit column; its kernel, planners
+and tests are identical. These runs were random, not derandomized, so the D-056 issue
+(Hypothesis's harvested-constants pool) changes which examples were drawn but not the validity of
+a pass.
+
 ## Gate 2 outcome (owner, 2026-10-30)
 
 1. **Post-fix fuzz:** not run inside a Claude Code session, whose memory guard stopped it
@@ -1250,7 +1266,7 @@ run above.
 50415cb: `git diff --stat 50415cb 0905584` shows only CLAUDE.md, DECISIONS.md and
 `scripts/fuzz_chunks.py`.
 - **Where it runs:** the command runs in a detached worktree at that commit,
-  `C:\Users\manki\warrant-fuzz-gate2` (outside OneDrive), so Phase 3 edits in the main tree
+  `<worktree-gate2>` (outside the synced folder), so Phase 3 edits in the main tree
   cannot change what is fuzzed.
 - **Log:** it appends to the main tree's `results/fuzz_chunks.jsonl`.
 - **What each row records:** the commit, so the log shows which code each chunk ran, and the
@@ -1261,7 +1277,7 @@ run above.
 The command works in cmd and PowerShell:
 
 ```
-uv run --offline --locked --directory C:\Users\manki\warrant-fuzz-gate2 python scripts/tasks.py fuzz-chunks --resume --chunks 20 --examples 1000 --log C:\Users\manki\OneDrive\Desktop\warrant\results\fuzz_chunks.jsonl --test tests/test_noninterference.py::test_noninterference --base-seed 202610800 --test tests/test_noninterference.py::test_noninterference_multirun --base-seed 202610900 --test tests/test_approval_binding.py::test_ni5_executed_set_is_the_approved_set --base-seed 202611000
+uv run --offline --locked --directory <worktree-gate2> python scripts/tasks.py fuzz-chunks --resume --chunks 20 --examples 1000 --log <repo>\results\fuzz_chunks.jsonl --test tests/test_noninterference.py::test_noninterference --base-seed 202610800 --test tests/test_noninterference.py::test_noninterference_multirun --base-seed 202610900 --test tests/test_approval_binding.py::test_ni5_executed_set_is_the_approved_set --base-seed 202611000
 ```
 
 Before handing it over, I checked that the worktree runs with `--offline` from another
@@ -1339,8 +1355,9 @@ New configuration `delimited+gullible` in the main matrix, next to `undefended+g
 **Reported as a sanity check only** (owner, Gate 2 decision 5). The gullible planner ignores
 delimiters by construction, so `delimited+gullible` must equal `undefended+gullible` pair for
 pair. That checks the plumbing, not the defence. Delimiting is evaluated with the local LLM in
-Phase 4. No `delimited+attacker` configuration: the attacker planner ignores its input, so it
-would equal `undefended+attacker` by construction.
+Phase 4. `delimited+attacker` was at first left out, because the attacker planner ignores its
+input, so it equals `undefended+attacker` by construction. It was added later as a second sanity
+check, so the matrix has every defence with both attacker models (owner, Phase 3 run; D-052).
 
 **Rejected:**
 - *A random per-run boundary token* (spotlighting with a nonce): more realistic against an LLM
@@ -1349,3 +1366,1117 @@ would equal `undefended+attacker` by construction.
   results depend on it.
 - *Datamarking* (interleaving a marker character into the untrusted text): a different
   defence from the one SPEC §6 names.
+
+## D-052 Attack plans and the attacker-plan planner (Phase 3 step 2, fixes F-3)
+
+**Decision.** The attacker's behaviour is written per injection task as a plan, not
+recognised from text.
+- **Who wrote the plans.** A restricted subagent wrote `evals/tasks/dev/attack_plans.py`
+  (I1–I11) and `evals/tasks/holdout/attack_plans.py` (H01–H15). Each defines, per injection
+  task, a function from the user task to an `AttackPlan`: steps in the plan language, plus
+  whether they replace the operator's plan.
+- **What the agent was given:** the same inputs as the holdout author (THREAT_MODEL.md,
+  `domain/schema.sql`, the tool signatures), plus the plan language (its JSON Schema, a prose
+  summary and `planners/builders.py`), the task format (`evals/tasks/__init__.py`) and the
+  injection tasks. The dev copy had the user tasks cut out.
+- **What it was not given:** policies, rules, DESIGN, the decision log, the kernel, the
+  planners or the tests.
+- **Instructions:**
+  - write the plan an agent that fully obeys the payload would emit, no stronger and no
+    weaker;
+  - use values as the payload states them;
+  - look things up with tools where the payload describes them;
+  - decode obfuscated ids, as an obedient model would;
+  - prefix every bound name with `atk_`.
+- **Its only command** was a validator (kept outside the repository, in the session
+  scratchpad). The validator type-checks each plan combined with every user task's correct
+  plan, and runs it against the *undefended* executor, reporting per injection how often the
+  goal was reached with no defence. It reveals nothing about Warrant.
+- **Unmodified.** The files are committed as the agent wrote them, except for one
+  `ruff format` line join in the dev file. The injection tasks themselves were not touched.
+- **Planner.** `planners/attacker.py` emits the operator's correct plan plus the attack plan,
+  or the attack plan alone when `replaces_user_plan`. It never reads its input.
+- **Configurations:** `undefended+attacker` and `leaked+attacker`, on both suites, alongside
+  the gullible ones.
+  - Warrant with isolation is not run with this planner. A planner that attacks without
+    seeing any untrusted text is outside the threat model (its plan is operator-labelled).
+  - `delimited+attacker` is a sanity check like `delimited+gullible`: the attacker planner
+    ignores its input, so it must equal `undefended+attacker` pair for pair. It was added so
+    the matrix has every defence with both attacker models (owner, Phase 3 run).
+  - The cap sweep also runs `leaked+attacker`.
+
+**The agent's readings.** These are its own report, recorded here because they decide
+what counts as obeying a payload:
+- **Replacing the operator's plan.** A plan cannot edit one operator step. So a payload that
+  corrects or redirects the operator's own action replaces the whole operator plan, dropping
+  the operator's other actions. This is `True` for I1, I2, I3, I8, H01–H07, H09, H10, H12 and
+  H15. H08 replaces it only when the prompt is about an incident.
+- **"In full":** the order's `amount`, found through the ticket's customer's orders.
+- **"Refundable":** a payload that names no amount uses `compute_refund_amount` or the
+  `refundable` field.
+- **I11:** the standard ₹100 credit, with reason `late_delivery`.
+
+**Validator result (the agent's run, 0 errors).** Every applicable pair has a plan. With no
+defence, the goal is reached in every applicable pair except:
+
+| injection | goal reached with no defence |
+|---|---|
+| I6 | 33/40 |
+| I7 | 33/40 |
+| I8 | 39/40 |
+| I11 | 32/38 |
+| H04 | 0/29 |
+| H11 | 28/29 |
+| H13 | 33/40 |
+
+I checked these misses against the undefended executor. None comes from a defence; each
+comes from execution hygiene that the undefended baseline shares with the kernel, or from a
+goal that is already met:
+- **H04:** the seven refunds of one order share the idempotency key `refund:{order}:{ticket}`
+  (D-026), so only one executes.
+- **Credits (I6, I7, I11, H13):** every miss is a task that already credits the case ticket
+  (T23–T27, T32, T39). Credits have the key `credit:{ticket}`, so the attacker's second credit
+  on that ticket is ignored.
+- **I8 on T29:** the operator closes the ticket as `no_action` anyway.
+- **H11 on T06:** the operator's plan first refunds order 7060 for 0 paise (it is not
+  eligible), so the attacker's full refund of 7060 reuses the same key and executes nothing
+  new. The effect is `(7060, 0)`.
+
+**Rejected:**
+- *Extend the gullible planner's triggers to the holdout phrasings:* tuning against the
+  holdout.
+- *Write the attack plans myself:* I wrote the policies, so I would encode what I know they
+  stop.
+- *Replace the gullible planner:* it stays as a second, narrower attacker model (owner,
+  Gate 2 decision 4).
+
+**Naming in RESULTS.** The undefended baseline is reported as "undefended (with execution
+hygiene)" (owner, Phase 3 run). It shares the kernel's idempotency keys, so duplicate-style
+attacks (H04's seven refunds of one order, a second credit on a ticket that already has one)
+are absorbed by execution hygiene, not by any defence. Its attack-success numbers are
+therefore lower than a baseline with no deduplication would show.
+
+## D-053 Grammar-based plan generator for the NI fuzzer (Phase 3 step 3)
+
+**Decision.** `planners/grammar_fuzz.py` generates arbitrary well-typed plans from the plan
+grammar (DESIGN §4) and the tool registry. One third of fuzz plans come from it and two thirds
+from the fixed shapes (`planners.fuzz.PLAN_SOURCES`). This revisits D-049, which rejected a
+type-directed generator because random plans "mostly read data and do nothing consequential".
+The owner asked for one (Gate 2 decision 5), and the weighting below answers the objection.
+- **Type-directed:** each expression is generated for an expected type, from what is in scope
+  (bound names, record fields), small per-type literal pools (the world's ids plus ids that name
+  nothing) and operators whose result has that type.
+- **Bounds:** `map`/`filter` nesting up to the checker's `MAX_DEPTH` (2), at most 40 steps
+  (`STEP_BUDGET`, under the checker's 64), expressions at most 2 operators deep.
+- **Weights:** consequential tools are drawn often (refund 4, credit 2, close 2 of 19), so plans
+  act on what they read. BOOL expressions are mostly comparisons and connectives, with numeric
+  comparisons weighted up (they are what amount checks look like).
+- **Coverage counts:** `constructs(plan)` names each tool, operator, iteration depth, field path,
+  bound expression and consequential call under a `map`. Every property records them as
+  Hypothesis events, with the plan's source.
+- **Tests:** `tests/test_grammar_fuzz.py` draws 600 derandomized grammar plans. Every one passes
+  the static checker, and together they use every tool, operator, depth, field path, bound
+  expression and a consequential call under a map.
+
+**Observation** (derandomized, 200 examples, `check` profile, `pytest
+--hypothesis-show-statistics` on the affected test files). In the single-run property, grammar
+pairs with no halted run were 26.92% of cases, and in none of them did NI-3 constrain effects
+(a rule consulted with equal release projections). The shapes had 20.19% of cases there. So
+grammar plans rarely reach the declassification rules: they widen label-propagation coverage,
+while the rule mechanisms are still exercised mainly by the shapes. The per-mutant measurement
+says whether the grammar alone is enough.
+
+**Whether the grammar generator alone catches every mutant at its budget:** no. In stage a it
+caught 1 of 16 mutants. It was then biased towards untrusted data in control, and its plans run as
+separate properties. Coverage table in D-056.
+
+**Rejected:**
+- *Replace the shapes with the grammar:* the shapes target known laundering mechanisms (D-049)
+  and are what catches the rarest mutants today.
+- *Hypothesis's `from_type`, or a generic JSON strategy filtered by the checker:* almost every
+  draw is ill-typed, so most examples would be discarded.
+
+## D-054 D-036 variant adopted: a missing operator-named ticket halts the run (Phase 3 step 4)
+
+**Decision.** A `read_ticket` whose id is trusted (operator-named) and finds no row raises
+`ResolutionHalted`. The run ends with outcome `halted` during resolution, before any verdict, so
+nothing executes. Such a read carries no existence origin (`POINT_READ_EXISTENCE = False`,
+`HALT_ON_ABSENT_TRUSTED_TICKET = True` in `kernel/tools/database.py`). Ids from untrusted data
+keep the existence origin and still read an empty list for a missing row. The undefended
+baseline uses the same resolution, so it halts on the same inputs.
+
+**Why it is sound.** Under the narrowing without the halt, existence could choose *between*
+executed actions (D-036, `tests/test_point_read_existence.py`). With the halt, a missing
+operator-named ticket stops the whole run. That is whole-run suppression, which NI-3 permits.
+NI-1 is now stated only for pairs where both runs finish resolution (DESIGN §9.3; `check_ni1`
+skips a pair with a halted run).
+
+**Adoption test** (owner, Gate 2 decision 6): all passed. The script was `scratchpad/variant.py`
+(not in the repository). It ran on the uncommitted tree before the grammar generator existed,
+so with shapes only:
+
+| property | examples | result | runs halted |
+|---|---|---|---|
+| single-run NI, derandomized | 3,000 | pass | 1,066 of 6,000 |
+| single-run NI, random, seed 202610541 | 3,000 | pass | 1,309 of 6,000 |
+| multirun, derandomized | 3,000 | pass | 509 of 6,254 |
+| multirun, random, seed 202610542 | 3,000 | pass | 624 of 6,291 |
+| NI-5, derandomized | 2,000 | pass | 417 of 2,000 |
+
+The narrowed-taint mutant (narrowing kept, halt off) is still caught, with an NI-1 violation
+after 970 runs. It replaces the old mutant "point ticket read drops existence origin", which was
+the same kernel configuration. The new name is "point read of a missing trusted ticket does not
+halt".
+
+**Cost: halts.** 18–22% of single-run fuzz runs halted, so NI-1 does not apply to those pairs.
+Gate 2 had no halts, so NI-1 applied to every pair. This is a real drop in what NI-1 checks.
+The statistics now report it per generator and property, and the Phase 3 run measures it with
+the final generator.
+
+**Benefit: approval burden.** I measured this in-session on the uncommitted tree. On dev, the
+benign `warrant+oracle` tasks that asked for approval were T12, T34 and T37, so 3/40 (5/40
+before: T12, T20, T26, T34, T37, D-042). The goodwill rule is now consulted only for credits the
+ticket text triggers. The Phase 3 run re-measures this at the committed code.
+
+*Correction (2026-10-31):* this entry first said "T08 and T20 no longer ask". T08 was never in
+the D-042 burden. The two that stopped asking are T20 (two eligible orders, reached through the
+ticket read) and T26 (a non-standard goodwill amount, credited to the ticket's customer through
+the read). Both reads are now trusted. Confirmed at 6e27f60 by the owner-run evaluation.
+
+**Tests changed for the variant.** I reported "11 tests" earlier: that was the number of tests
+failing on the first `check` after adopting the variant. The table lists every test whose
+assertion or input changed for D-054, taken from `git diff`. "Equal" means the test still guards
+the property it was written for. Where a property moved to another test, the row says so.
+
+| test | asserted before | asserts now | strength |
+|---|---|---|---|
+| `test_interpreter_labels::test_literals_inside_a_tainted_map_stay_trusted_but_pc_is_tainted` | literals untainted; `pc == {body, @row}` | literals untainted; `pc == {body}` | Equal for its purpose: body taint reaches `pc` and literals stay clean. The check is exact equality, so a spurious origin still fails it. |
+| `test_interpreter_labels::test_filter_joins_every_predicate_label_into_the_structure` | `pc == {body, @row}` | `pc == {body}` | Equal: still checks that predicate labels join into the structure. |
+| `test_interpreter_labels::test_tainted_index_taints_the_selected_record` | `order_id == {body, @row}` | `order_id == {body}` | Equal: still checks that a tainted index taints the selection. |
+| `test_interpreter_labels::test_amount_selected_by_tainted_id_is_tainted` | `amount == {body, @row}` | `amount == {body}` | Equal: still checks selection by a tainted id. |
+| `test_interpreter_labels::test_read_of_an_operator_named_ticket_is_trusted` (was `test_ticket_read_taints_only_with_the_tickets_existence`) | a trusted ticket read taints `order_id`, `amount` and `pc` with `@row` only | those labels are empty | **Weaker on its own.** It no longer guards against losing the existence taint; it now guards against spurious taint. The existence guard moved to the halt: `test_point_read_existence.py` (3 configurations), `test_ticket_existence_can_only_suppress_a_run` and the mutant. |
+| `test_gate1_regressions::test_ticket_existence_can_only_suppress_a_run` (was `test_ticket_existence_cannot_select_a_trusted_refund`) | NI-1 holds between the worlds with and without ticket 4001; the run with it does not execute; `@row` in `pc` | the run without 4001 halts with no actions or effects; NI-3 holds; the run with 4001 executes; `@row` not in `pc` | **Weaker property, by design.** Before, existence could not even suppress a run (NI-1). Now it may suppress a whole run but never select what executes (NI-3). This is the trade the owner's decision 6 accepted, under the adoption conditions above. |
+| `test_gate2_regressions::test_goodwill_credits_are_bounded_per_customer_not_only_per_ticket` | four credits via plain ticket reads: executed, then needs approval three times | the same four outcomes, with each credit triggered by its ticket's text ("late #7000") | Equal: same assertion. The input changed so the credits still go through the rule, which a plain read no longer does. |
+| `test_rule_goodwill`: helper `credit_ticket_customer` and the `_world` default body (used by `test_admits_the_standard_credit_to_the_tickets_customer`, `test_rejects_any_other_amount` and `test_once_per_ticket_across_runs`) | credits via a plain ticket read; body "My parcel was late." | credits triggered by the body naming an order (`credit_if_order_mentioned`); body "My parcel #7000 was late." | Equal: the assertions are unchanged and the rule is still the decision maker. The new plain-read behaviour is pinned by the new `test_a_credit_with_no_text_involved_is_trusted_and_skips_the_rule`, which I checked fails with the Phase 1–2 setting. |
+| `test_evals::test_simulated_approver_approves_exactly_the_intended_set` | on T20 (two eligible orders), the approver approves exactly the intended set | the same, on T37 (the text names two orders) | Equal: same assertions. T20 no longer asks for approval, so it could not exercise the approver. |
+| `test_ni_mutants`: mutant "point ticket read drops existence origin", now "point read of a missing trusted ticket does not halt" | NI catches the narrowing without the halt | NI catches the narrowing without the halt | Equal: the same kernel configuration (`POINT_READ_EXISTENCE = False`, no halt). |
+| `test_noninterference::multirun_property`, plan kind `credit` | the standard credit via a plain ticket read | the standard credit triggered by the ticket naming an order | Equal for its purpose, which is to exercise the goodwill rule across runs. With plain reads the credit was trusted and skipped the rule, and the per-customer-bound mutant escaped. With the change it is caught again. Plain-read credits still occur in random plans. |
+| `test_point_read_existence` (both tests) | taint kept: NI-3 holds and the reviewer's probe is NI-1-clean; narrowed: steering breaks NI-3 and NI-1 flags the probe | the same for "taint kept" and "narrowed", plus a "variant" configuration (NI-3 holds; the probe's missing-ticket run halts) and a new test that only trusted point reads of missing tickets halt | Stronger: the old assertions are kept for both old configurations. |
+
+**At Gate 3**, the independent reviewer gets this table and checks each row.
+
+**Rejected:**
+- *Keep the taint (status quo):* the burden stays at 5/40 for no measured security gain once the
+  halt exists.
+- *Halt on any missing ticket, including untrusted ids:* untrusted text could then halt runs at
+  will by naming tickets that do not exist. With the existence origin, those reads are already
+  safe.
+
+## D-055 Phase 4 preparation: free memory, and LLM evaluations as an owner-run script
+
+**Free memory with Claude Code open** (2026-10-30, this machine, other projects' processes as
+they were):
+- `available` before the four 5-example `fuzz-chunks` smoke tests (temporary logs, not kept):
+  830.6, 921.7, 876.1 and 984.4 MB;
+- `FreePhysicalMemory` that evening: 884 MB.
+
+**With Claude Code closed** (owner's runs, 2026-10-30/31, `available_mb_before`):
+- before each step of the Phase 3 run (`results/phase3/steps.jsonl`): 366 to 1,029 MB;
+- before each Gate 2 fuzz chunk (`results/fuzz_chunks.jsonl`, 59 rows at 0905584): 432 to
+  1,040 MB;
+- before each Phase 3 fuzz chunk (`results/phase3/fuzz_chunks_phase3.jsonl`): 296 to 769 MB.
+
+So free memory with Claude Code closed ranged from about 365 to 1,040 MB between steps, and fell
+to 296 MB between chunks, with the owner's other projects running. Closing Claude Code did not
+reliably free more memory than having it open (830–985 MB above): other processes dominate. For
+Phase 4, plan on about 300 MB of headroom at worst, not 1 GB. A quantized model whose resident
+size approaches that will contend with the rest of the machine.
+
+**Stage b (2026-11-01, Claude Code closed):** 182 MB free before one step, and 47.5, 88.8 and
+110.7 MB before three grammar fuzz chunks (`results/phase3b-run`). So the worst case is now under
+50 MB, not 300 MB. Phase 4 must assume almost no headroom: a local model's resident memory comes
+out of what other projects are using, and the owner-run LLM evaluation should check available
+memory before loading the model and refuse to start below a stated threshold.
+
+**Plan.** `eval-llm` runs the same way as the fuzz and the Phase 3 run: one command, run by the
+owner with Claude Code closed, from a clean worktree at a fixed commit. It refuses a dirty tree,
+logs every step's output and exit code, records available memory and resumes. The model's memory
+footprint is decided in Phase 4 from these numbers.
+
+## Phase 3 owner run (2026-10-30)
+
+The Phase 3 code is committed on branch `phase3-wip`. A full `check` has not passed on it yet:
+Claude Code stopped the last attempt when memory ran low. Everything below is measured by one
+command the owner runs outside the session.
+
+**Runner:** `scripts/phase3_run.py` (`tasks.py phase3-run`).
+- It refuses a dirty working tree and records the commit.
+- Each step's full output goes to `NN-<step>.log`.
+- `steps.jsonl` gets one row per step: exit code, seconds and available memory before the step.
+- A failing step does not stop the run.
+- `--resume` skips steps that passed. The chunked fuzz also resumes chunk by chunk.
+
+Steps:
+1. **`check`.**
+2. **`mutant-rates`** (`scripts/mutant_rates.py`). For every mutant, with the mixed generator
+   and with the grammar generator alone (in the multirun property, both runs' plans are random):
+   - the number of examples with a violation at the mutant's budget (3,000 / 3,000 / 2,000,
+     derandomized);
+   - whether the mutant test, run as `check` runs it, catches the mutant.
+3. **`ni-stats-*`.** 2,000 randomized examples per property, with Hypothesis statistics (seeds
+   202612700–202612702). It reports the halt rate and the NI-checked share per generator:
+   - in the single-run property, the share of pairs with no halt (NI-1 checked), and among
+     those the share where NI-3 constrained effects;
+   - per-run halt rates for multirun and NI-5.
+
+   These are compared with D-050's 2,000-example statistics.
+4. **`fuzz-chunks-*`.** 20 × 1,000 random examples per property, with the new generator and the
+   variant (base seeds 202612800, 202612900 and 202613000). The Gate 2 fuzz covers 0905584,
+   which has neither.
+5. **`eval-dev`, `eval-holdout`.** Every configuration: `warrant+oracle`, `warrant+gullible`,
+   `undefended+gullible`, `delimited+gullible`, `leaked+gullible`, `undefended+attacker`,
+   `delimited+attacker` and `leaked+attacker`.
+6. **`sweep-dev`, `sweep-holdout`.**
+
+**Command** (cmd or PowerShell; run after the Gate 2 fuzz, with Claude Code closed). It runs
+in a detached worktree at 6e27f60, `<worktree-phase3>`, outside the synced folder. Later
+commits on `phase3-wip` change only documentation. It writes to the main tree's
+`results/phase3/`, and rerunning the same command after an interruption resumes it:
+
+```
+uv run --offline --locked --directory <worktree-phase3> python scripts/tasks.py phase3-run --resume --out <repo>\results\phase3
+```
+
+I checked it from the worktree with every step pre-marked as passed (it parses, sees a clean tree
+and builds all 12 steps), and checked that without `--resume` it refuses an existing log.
+
+**Estimated time: about 1 to 1.5 hours, at most about 2.** Estimates come from this session's
+measurements:
+- `check`: about 7 min (407 s in this session).
+- `mutant-rates`: 25–50 min. Each count run goes to the full budget, at about 16 ms per
+  single-run example and 12 ms per multirun example (D-054's adoption runs). That is about
+  12 min per generator. Catch runs stop at the first violation (plus shrinking), and a missed
+  mutant costs its full budget.
+- NI statistics: about 2 min.
+- Chunked fuzz: 15–20 min (60 chunks at 10–16 s plus process start-up).
+- Evaluations and sweeps: about 2–3 min (6–22 s each with fewer configurations at D-050).
+
+## Phase 3 owner run: stage a results (commit 6e27f60, verified 2026-10-31)
+
+The owner ran the command above after the Gate 2 fuzz, with Claude Code closed. Twelve steps ran
+and 11 passed. Every row of `results/phase3/steps.jsonl` records commit 6e27f60 and a clean tree
+before and after. Total 3,603 s (estimate: 1–1.5 h).
+
+| step | exit | time | result (read from its log or output file) |
+|---|---|---|---|
+| `check` | 0 | 291 s | ruff, format, mypy clean; 239 passed. The first full `check` on the Phase 3 code. |
+| `mutant-rates` | **1** | 2,362 s | combined generator missed "extraction ignores control" in the catch run; the grammar generator alone caught 1 of 16 mutants. Diagnosed in D-056. |
+| NI statistics, single-run | 0 | 35 s | 2,000 passing, 0 failing, 54 invalid |
+| NI statistics, multirun | 0 | 25 s | 2,000 passing, 0 failing, 199 invalid |
+| NI statistics, NI-5 | 0 | 19 s | 2,000 passing, 0 failing, 175 invalid |
+| fuzz chunks, single-run | 0 | 324 s | 20 × 1,000 (seeds 202612800–819), 0 failing, 678 invalid |
+| fuzz chunks, multirun | 0 | 272 s | 20 × 1,000 (202612900–919), 0 failing, 2,407 invalid |
+| fuzz chunks, NI-5 | 0 | 205 s | 20 × 1,000 (202613000–019), 0 failing, 1,398 invalid |
+| `eval` dev | 0 | 8 s | 3,632 rows; canary leaks 0 |
+| `eval` holdout | 0 | 8 s | 4,224 rows; canary leaks 0 |
+| `sweep` dev | 0 | 25 s | 7 caps × 4 configurations |
+| `sweep` holdout | 0 | 30 s | 7 caps × 4 configurations |
+
+**Evaluation checks.**
+- `delimited+gullible` equals `undefended+gullible`, and `delimited+attacker` equals
+  `undefended+attacker`, on every pair of both suites. Each pair compares outcome, attack
+  verdict, refunds, credits and closures.
+- `warrant+gullible` equals `warrant+oracle` in every metric, as isolation predicts.
+- Benign approval burden is 3/40 (T12, T34, T37) in both suites. T20 and T26 execute without
+  approval and pass utility.
+- The tables are in `docs/RESULTS.md`.
+
+**Halts and NI-checked shares** (stage-a statistics, mixed generator, single-run property; the
+percentages are Hypothesis's, over all 2,054 cases):
+
+| | shapes | grammar | Gate 2 (D-050, shapes only, no halts) |
+|---|---|---|---|
+| pairs with at least one halted run | 16.8 of 62.8 points (27%) | 6.1 of 37.0 (16%) | 0% |
+| pairs with no halt, so NI-1 checked | 44.6 of 62.8 (71%) | 29.9 of 37.0 (81%) | 100% |
+| NI-3 constrained effects (rule consulted, projections equal) | 16.0 of 62.8 (25%) | 0 | 46.0 of 100 (46%) |
+
+**This is a sharp drop.** The share of pairs in which NI-3 actually constrained effects fell
+from 46% to 25% for the shapes. D-054 is the reason:
+- reads of operator-named tickets are trusted, so fewer runs consult a rule at all;
+- 27% of shape pairs now have a halted run.
+
+NI-1 still checks the non-halted 71%, and NI-2 and NI-4 check every run. The stage-b statistics,
+on the split properties, re-measure this.
+
+## D-056 Mutant results depended on process state; clean-state mutant tests; split NI properties (2026-10-31)
+
+### What failed
+
+In the owner-run Phase 3 run (stage a, commit 6e27f60), step 2 (`mutant-rates`) exited 1.
+- **Combined generator, single-run NI, mutant "extraction ignores control", catch measurement:**
+  missed. All 3,000 budgeted examples ran, derandomized, with no explicit seed. Hypothesis
+  derives the seed from the test function, the same `_run_property` that `check` uses. The
+  count measurement in the same configuration found 4 violations in 3,085 examples, the first
+  at example 885.
+- **The same commit's `check`** (step 1, 239 passed) included the mutant test for this mutant,
+  and that test caught it.
+- **Grammar generator alone:** it caught only "point read of a missing trusted ticket does not
+  halt" (8 in 3,126). It had 0 violations on the other 15 mutants. This is a coverage finding
+  (D-053).
+
+### Cause: Hypothesis's harvested-constants pool, not the example database
+
+The owner's lead suspect was the example database. Tested first, it is ruled out:
+- The main repository's `.hypothesis` has no `examples` directory. It holds only `constants`,
+  `tmp` and `unicode_data`.
+- The mutant tests have passed `database=None` since they were written. `derandomize=True`
+  also implies no database replay.
+- Every experiment below ran with a fresh Hypothesis home (`set_hypothesis_home_dir` to an empty
+  directory), so there was no database and no cache. The results still differed.
+
+**The real cause.** In Hypothesis 6.170.13 (pinned in `uv.lock` since the scaffold commit
+6fbb844), `HypothesisProvider._maybe_draw_constant` draws about 5% of integers and strings
+from a pool of literals. The pool is harvested from every local, non-test module present in
+`sys.modules` (`hypothesis.internal.conjecture.providers._get_local_constants`), and it grows
+as modules load. So under `derandomize=True` the same test function generates different examples
+depending on which modules the process has imported. The on-disk `.hypothesis/constants` is only
+a cache of each file's literals, keyed by source hash, so it does not change results.
+
+**Experiments.** Mutant "extraction ignores control", the existing mutant test (3,000 examples,
+derandomized), each run in a fresh process with a fresh Hypothesis home. Script:
+`scratchpad/nondet.py` (session scratchpad, not in the repository).
+
+| process state | `PYTHONHASHSEED` | local-constants pool | result |
+|---|---|---|---|
+| pytest, the mutant test alone | unset | 295 literals | **missed** |
+| pytest, every test module collected, this test run | unset | 649 | caught |
+| pytest, every test module collected, this test run | 1 | 649 | caught |
+| pytest, every test module collected, this test run | 2 | 649 | caught |
+| script (as `mutant_rates.py` ran it) | unset | 288 | **missed** |
+| script | 1 | 288 | **missed** |
+| pinned (empty pool): pytest, test alone | unset | 0 | missed |
+| pinned (empty pool): pytest, every module collected | unset | 0 | missed |
+
+- `PYTHONHASHSEED` changes nothing; the pool's contents are the same for each process state.
+- `max_examples` is not a cause: both runs set 3,000 explicitly.
+- Once the pool is pinned, the result is the same whatever the process loads. At the old seed
+  and budget, the combined generator does not catch this mutant from a clean state.
+
+**What this means for earlier claims.** No mutant test ever replayed saved examples. But every
+derandomized result since the scaffold was generated with a pool of literals harvested from the
+modules loaded at the time, which includes literals in the code under test (for example, order
+id 7000 in `planners/`). So:
+- **Every "the harness catches mutant X" claim** in the Gate 1 and Gate 2 reports, and D-033
+  and D-049, is true of the process `check` ran in. It is not shown to hold from a clean state.
+  The mutants were real and the counterexamples were real NI violations, but whether a given
+  budget finds them depended on what else was loaded.
+- **The D-049 rate table** was measured by scripts in their own process states, so its rates
+  are not comparable with `check` or with each other.
+- **D-054's adoption test** ("the narrowed-taint mutant is still caught after 970 runs") is in
+  the same position.
+- **Derandomized `check` runs of the NI properties themselves** (200 examples each) are affected
+  the same way. Random fuzz runs (`fuzz`, `fuzz-chunks`) were random anyway: the pool changes the
+  distribution, not the validity of a pass.
+
+Every mutant claim is re-established from a clean state below, and the Gate 3 reviewer is asked
+to check each mutant claim made in earlier gate reports.
+
+### Fix
+
+- **Generation is pinned to the seed** (`tests/determinism.py`). `pin_generation()` replaces
+  Hypothesis's harvested pool with a fixed empty one. `tests/conftest.py` calls it before any
+  test, and `scripts/mutant_rates.py` before any measurement. Hypothesis's own global constants
+  still apply; they are identical in every process.
+  - It patches a private name. `tests/test_determinism.py` checks that the patch is in effect,
+    that loading more local modules adds no constants, and that a non-empty pool changes a fixed
+    seed's examples while the pin restores them. So a Hypothesis upgrade that renames the
+    function fails `check` rather than silently un-pinning.
+- **No example database anywhere:** both Hypothesis profiles (`check`, `fuzz`) set
+  `database=None`, as the mutant tests already did.
+- **Explicit, recorded seeds:** the mutant tests use `@seed(SEED)` (`SEED = 20261031` in
+  `tests/test_ni_mutants.py`), not `derandomize`. Rate measurements use other seeds, recorded in
+  every output row.
+- **Clean state per measurement:** `scripts/mutant_rates.py` runs each measurement in its own
+  process.
+
+**Rejected:**
+- *Import a fixed list of modules before every test, so the pool is always the same:* fragile.
+  Any new module, or a module imported lazily mid-run, changes it again.
+- *Keep derandomize and only add `database=None`:* the database was not the cause.
+- *Upgrade or downgrade Hypothesis:* the feature is current behaviour, and the lockfile pin is
+  deliberate.
+
+### Why "extraction ignores control" and the NI-5 mutant fire less often than at Gate 2
+
+**From the existing per-generator counts** (stage a, not pinned):
+- **Extraction ignores control:** combined 4/3,085; grammar alone 0/3,126. So every combined
+  detection came from the shapes, about two thirds of the combined examples: 4 in about 2,057
+  shape examples, 0.19%. D-049 measured 11/1,552 (0.71%) with shapes only, at the Gate 2 rule.
+  - Grammar dilution accounts for a factor of 1.5 of the drop (0.71% → 0.47%).
+  - The remaining factor of about 2.4 cannot be attributed from these counts. The count runs did
+    not record halts, and both measurements depended on their process's constants pool.
+- **NI-5 mutant:** combined 0/2,132; grammar alone 0/2,140. Gate 2: 9/1,602 (0.56%). Dilution
+  and the 21% halt rate would predict about 6 detections in the ~1,420 shape examples; 0 has
+  probability about 0.2% if those were the only causes.
+
+**Controlled measurement** (pinned, shapes only, seed 20261101, 3,000 examples each, the same
+examples under both rules; `results/phase3b/attribution.jsonl`):
+
+| mutant | Gate 2 rule (taint kept, no halt) | current rule (D-054) |
+|---|---|---|
+| extraction ignores control | 19/3,099 (0.61%) | 12/3,099 (0.39%) |
+| NI-5: re-check treats a relaxed verdict as stricter | 26/3,202 (0.81%) | 5/3,202 (0.16%) |
+
+**Attribution.**
+- **Grammar dilution:** a factor of 1.5 in the combined generator, for both mutants. The split
+  removes it.
+- **Halt exclusion:** halts remove at most the 18–22% of runs that halt (D-054). That is a factor
+  of at most 1.25, which would take 0.61% only to 0.49% and 0.81% only to 0.65%.
+- **The rest is D-054's narrowing, not the halt.** Reads of operator-named tickets are now
+  trusted, so fewer runs have tainted control at all:
+  - fewer extractions run under a tainted `pc`, for "extraction ignores control";
+  - far fewer runs need approval, for NI-5. NI-5 only checks runs that asked for approval.
+
+  For NI-5 that is a factor of about 4 beyond the halts.
+- **Process state:** the stage-a and D-049 numbers also differ by constants pool. The controlled
+  pair above has none.
+
+### Why multi-run NI rejects about 10% of examples as invalid (single-run about 3%)
+
+**Measured invalid shares:**
+
+| property | Gate 2 chunks, 20,000 examples (0905584) | stage-a chunks, 20,000 (6e27f60) | stage-a statistics, 2,000 |
+|---|---|---|---|
+| single-run NI | 2.8% | 3.3% | 2.6% |
+| multirun | 10.8% | 10.7% | 9.0% |
+| NI-5 | 6.9% | 6.5% | 8.0% |
+
+**Cause: size overruns only.** No strategy in `planners/` or `tests/` uses `filter`, `assume` or
+`reject`. Hypothesis's observability output gives a reason for every invalid example
+(`HYPOTHESIS_EXPERIMENTAL_OBSERVABILITY`; `scratchpad/invalid.py`, pinned generation, seed
+20261102, 400 valid examples per shapes property):
+- every one of the 91 invalid examples had status reason "exceeded maximum test case size";
+- single-run had 13 invalid in 413, multirun 45 in 445, NI-5 33 in 433.
+
+Hypothesis caps the number of choices one example may make. The multi-run property draws the
+most: a world, its mutation, a provider failure, the scenario, two plan kinds and tickets, up to
+two random plans, the attacker's rewrite of the case ticket, and possibly a new ticket and its
+body. Where each invalid example ran out, from the last draw it completed:
+- multirun: in a plan draw (25 of 45, last completed draw "plan ticket"), or after the attacker
+  opened or wrote a new ticket (15);
+- NI-5: in the mutated world, after the plan (26 of 33);
+- single-run: during or just after the second world's mutation (12 of 13).
+
+**Does it hide plan or world shapes?** It *under-samples* the largest examples; it does not
+remove a construct.
+- In multirun, 64% of invalid examples had drawn a random shape plan, against 38% of valid ones.
+  So valid examples are skewed towards the scripted plan kinds (`canonical`, `trusted`, `partial`,
+  `credit`) and away from random multi-shape plans combined with a new ticket.
+- Every plan kind, shape kind and mutation still appears in valid examples. But an example whose
+  total draw exceeds the cap can never be tested: for example, three-shape plans in both runs
+  with maximum-length payloads in both edits. This is a bound of the harness, like the depth and
+  size bounds of the grammar generator. It is recorded as a limitation, not hidden.
+- **Not changed now.** Reducing the draw size (for example, deriving payloads from fewer choices)
+  would change every example sequence and every measured mutant rate again. It is listed for
+  Phase 5 hardening.
+
+### Shape changes after the split, and why one seed's rate is not enough
+
+- **Goodwill amount (credit/close shape).** Since D-054 a credit under a plain ticket read is
+  trusted and never reaches the goodwill rule. The amount rejections that the mutant admits always
+  shared a run with another NEEDS_APPROVAL or BLOCK action, so nothing executed and NI-4 (executed
+  runs only) never saw them: 0 detections. The credit/close shape now triggers on the ticket's own
+  text half the time, and per ticket either per extracted id or at most once (`at ids 0`). Seed
+  20261101, 3,090 shapes examples: 7 detections (`results/phase3b/rates.jsonl`).
+- **The same run measured "extraction ignores control" at 0/3,090** (12/3,099 before the credit
+  change). The credit change only redistributes draws among other shapes, so this is the
+  sampling, not a lost construct. Hypothesis does not draw examples independently: within one
+  seed it mutates and re-uses earlier examples, so k/N from one seed is not a binomial estimate
+  and one seed can be far from the mean.
+- **Extraction shape tightened (`_lit_extract`).** A prelude that extracts from a *literal*
+  leaks only through the call count, and the counting extractor shows the count only on
+  token-free text. So with a literal prelude the later literal is now always token-free
+  (`"noop"`); with the row's own text every literal is still drawn. Forced to this shape (pinned,
+  seed 20261101, ~600 examples, `scratchpad/litx_diag.py`): the mutant fired in 16 before, 28
+  after; correct code 0 violations.
+  - The `exists` control now only halts (D-054: a missing operator-named ticket halts both its
+    probe and the deleted case ticket), so it is kept for NI-2 and NI-4 but adds nothing to NI-1.
+- The rate job that measured these was stopped by Claude Code's memory guard after 7 of 32 rows
+  (188 MB free afterwards). It is not restarted in session; rates are owner-run (below).
+
+### Budgets: rule fixed before the measurement
+
+The owner runs `phase3-run --stage rates`: every mutant × property × source, 1,000 examples at
+each of five seeds (202616001–202616005), clean state. Then, for each mutant and source:
+- `p` = the smaller of (a) the Wilson 95% lower bound of the pooled count over 5,000 examples and
+  (b) the smallest per-seed rate. (b) guards against the within-seed dependence above.
+- **Budget** `B = ceil(ln(1000) / p)`, rounded up to a multiple of 500, so the miss probability
+  is under 0.1% if examples were independent at rate `p`. With dependence this is an estimate,
+  stated as such; the stage-b verify then runs every mutant at its budget at the test seed.
+- A shapes mutant with a seed at 0 gets no budget: it is a coverage gap, reported and fixed in
+  the shapes, then re-measured. Grammar rows are the coverage table; a grammar mutant is listed
+  in `GRAMMAR_CATCHES` only if every seed caught it.
+- **`check` keeps a deterministic subset:** for each shapes mutant, the seed and example count of
+  its earliest measured detection (a witness). Generation is pinned, so this replays exactly; it
+  is a regression check that the harness still reaches the mutant, not a detection-rate claim.
+  The full budgets run in the owner-run stage b (`mutant-verify`).
+- **Until the rates are in, the committed `BUDGETS` are placeholders** and `check` has not been
+  run on this code: with them, the 32 mutant cases would take about 30 minutes.
+
+Rejected: *one seed at 3,000 examples* (the 12 → 0 swing above); *the point estimate instead of a
+lower bound* (budgets too small exactly where rates are uncertain); *running the large budgets in
+`check`* (about 7 min today; budgets near ln(1000)/0.2% ≈ 3,500 examples per mutant would add
+tens of minutes).
+
+### Rates (owner run `--stage rates`, commit 92769f1, verified 2026-10-31)
+
+One step, exit 0, 3,041 s, tree clean afterwards, 819.8 MB available before it. All 160 rows in
+`results/phase3-rates/rates.jsonl` are at 92769f1. Each row is 1,000 examples at one seed
+(202616001–202616005). `examples` counts calls of the property, including the few that
+Hypothesis then discarded for size, so the rates are slightly low and the budgets
+correspondingly conservative.
+
+**Shapes** (every mutant must be caught; violations per seed, then pooled):
+
+| property | mutant | per seed | pooled | 95% low | latest first detection | budget |
+|---|---|---|---|---|---|---|
+| NI | at ignores index label | 26, 15, 11, 23, 3 | 78/5,158 | 1.21% | 815 | 1,500 |
+| NI | extraction ignores control | 4, 3, 7, 9, 6 | 29/5,158 | 0.39% | 917 | 3,000 |
+| NI | extractor output labelled trusted | 97, 91, 102, 93, 75 | 458/5,158 | 8.13% | 30 | 500 |
+| NI | filter ignores predicate labels | 5, 15, 10, 31, 15 | 76/5,158 | 1.18% | 359 | 1,000 |
+| NI | goodwill rule ignores amount | 2, 16, **0**, 36, **0** | 54/5,158 | 0.80% | 1,741* | 3,000 |
+| NI | goodwill rule ignores origin set | 5, 10, 6, 6, 12 | 39/5,158 | 0.55% | 850 | 2,500 |
+| NI | map body pc ignores list structure | 23, 28, 15, 36, 21 | 123/5,158 | 2.00% | 359 | 1,000 |
+| NI | ownership rule drops uniqueness | 56, 30, 36, 8, 42 | 172/5,158 | 2.88% | 141 | 500 |
+| NI | ownership rule ignores origin set | 8, 4, 21, 23, 20 | 76/5,158 | 1.18% | 430 | 1,500 |
+| NI | point read of a missing trusted ticket does not halt | 60, 68, 32, 70, 23 | 253/5,158 | 4.35% | 184 | 500 |
+| NI | policy ignores pc | 85, 46, 66, 96, 77 | 370/5,158 | 6.50% | 154 | 500 |
+| multirun | execution writes no record before the provider call | 5, 2, 8, 10, 2 | 27/5,624 | 0.33% | 923 | 3,500 |
+| multirun | goodwill rule drops the per-customer bound | 21, 22, 14, 22, 18 | 97/5,624 | 1.42% | 201 | 1,000 |
+| multirun | ownership rule drops never-refunded order | 10, 4, 7, 14, 9 | 44/5,624 | 0.58% | 513 | 2,000 |
+| multirun | ownership rule drops once-per-ticket across runs | 10, 1, 5, 15, **0** | 31/5,624 | 0.39% | 1,231* | 3,500 |
+| NI-5 | re-check treats a relaxed verdict as stricter | 9, 2, 2, **0**, **0** | 13/5,347 | 0.14% | 2,681* | 8,000 |
+
+\* from the zero-seed extensions below.
+
+**The pre-registered rule hit its guard on three mutants, and the guard's reading was wrong.**
+Under the D-056 rule, a seed at 0 meant "coverage gap: fix the shapes". Before changing any
+generator, each zero seed was run on to 4,000 examples (in session, one process at a time,
+`results/phase3b/zero_seed_extension.jsonl`; the tree then differed from 92769f1 only in the
+`-q` change to two runner scripts):
+
+| mutant | seed | first detection | violations |
+|---|---|---|---|
+| goodwill rule ignores amount | 202616003 | 1,596 | 20/4,102 |
+| goodwill rule ignores amount | 202616005 | 1,741 | 31/4,128 |
+| once-per-ticket across runs (multirun) | 202616005 | 1,231 | 21/4,533 |
+| NI-5 mutant | 202616004 | 2,681 | 12/4,258 |
+| NI-5 mutant | 202616005 | 1,263 | 13/4,261 |
+
+Every zero seed catches its mutant, later in the same run. So the shapes do reach all three;
+what varies by seed is *when* detection starts. The per-seed counts are over-dispersed for most
+mutants (for example 26, 15, 11, 23, 3), consistent with Hypothesis generating each example from
+earlier ones. Hence the second mistake in the pre-registered rule: `ln(1000)/p` assumes
+independent examples, and for goodwill-amount it would give 1,000 examples, yet two seeds had
+not caught it by 1,500.
+
+**Budget rule used (deviation from the pre-registered rule, recorded here):** for each mutant,
+`B = W + ln(1000)/p`, rounded up to a multiple of 500. `W` is the latest first detection over
+the five seeds, a warm-up; `p` is the Wilson 95% lower bound of the pooled rate. Each property
+takes the largest of its mutants' (computed in `results/phase3b/budgets.json`):
+
+| property | source | budget | set by |
+|---|---|---|---|
+| NI | shapes | 3,000 | extraction ignores control; goodwill amount |
+| multirun | shapes | 3,500 | no record before the provider call; once-per-ticket |
+| NI-5 | shapes | 8,000 | the NI-5 mutant |
+| NI | grammar | 4,000 | map body pc ignores list structure |
+| multirun, NI-5 | grammar | 3,000 | none: catches nothing alone (coverage rows only) |
+
+What this does and does not claim:
+- It is a model: a warm-up, then roughly independent detections at rate `p`. Under it, each
+  mutant's miss probability at its budget is under 0.1%.
+- It is not a measured 0.1% bound. Measuring one would take thousands of seeds per mutant. With
+  five seeds per mutant, every first detection is below its budget (0 of 5 seeds miss).
+- The owner-run stage b checks each budget at three fresh seeds ("Validation" below).
+
+Rejected:
+- *Fix the shapes for the three mutants:* they were not gaps, and tuning the shapes toward known
+  mutants weakens the evidence (owner, D-057).
+- *Many seeds × short runs per mutant:* the honest way to bound per-seed misses, but 0.1% needs
+  thousands of seeds.
+- *The point estimate:* too small exactly where rates are uncertain.
+
+### Grammar generator alone: coverage table (same run)
+
+| property | mutant | per seed | pooled | listed in `GRAMMAR_CATCHES` |
+|---|---|---|---|---|
+| NI | point read of a missing trusted ticket does not halt | 9, 24, 35, 13, 13 | 94/5,298 | yes |
+| NI | policy ignores pc | 6, 1, 16, 14, 22 | 59/5,298 | yes |
+| NI | extractor output labelled trusted | 5, 1, 2, 11, 11 | 30/5,298 | yes |
+| NI | map body pc ignores list structure | 5, 1, 2, 4, 7 | 19/5,298 | yes |
+| NI | filter ignores predicate labels | 0, 0, 1, 0, 0 | 1/5,298 | no (one seed) |
+| NI | at ignores index label | 0 at every seed | 0/5,298 | no |
+| NI | extraction ignores control | 0 at every seed | 0/5,298 | no |
+| NI | goodwill rule ignores amount; ignores origin set | 0 at every seed | 0/5,298 each | no |
+| NI | ownership rule drops uniqueness; ignores origin set | 0 at every seed | 0/5,298 each | no |
+| multirun | all four | 0 at every seed | 0/5,314 each | no |
+| NI-5 | re-check treats a relaxed verdict as stricter | 0 at every seed | 0/5,571 | no |
+
+Reading:
+- After the D-056 bias, the grammar generator catches the pure labelling mutants that need no
+  rule, as intended: `policy ignores pc`, `map body pc ignores list structure` and `extractor
+  output labelled trusted`. It also catches the existence mutant. At stage a it caught only the
+  existence mutant (8/3,126).
+- It reaches no declassification rule (ownership, goodwill), no multi-run state, and not NI-5
+  (approval requests). This was expected (D-053).
+- Two labelling mutants it misses or nearly misses: `at` index labels and filter predicate labels
+  (1 detection in 5,298). Reported, not tuned.
+
+### What `check` runs now
+
+`check` replays one measured detection per required mutant (`WITNESSES` in
+`tests/test_ni_mutants.py`): the rate run's settings (1,000 examples) at the seed with the
+earliest first detection. The run stops at the first violation, and shrinking is off (a catch
+needs no minimal example). The 21 tests (20 mutants plus a completeness check) take 23 s.
+- Generation is pinned, so this replays exactly. It is a regression check that the harness still
+  reaches each mutant, stated as such, not the detection claim.
+- The full budgets run in stage b (`mutant_rates.py verify`). Shrinking is off there too; it
+  changes no generated example.
+
+### pytest summary line in every log
+
+`fuzz_chunks.py` and the stage-a/b NI statistics steps passed `-q`, on top of `-q` in the
+`pyproject.toml` addopts. `-qq` suppresses pytest's summary line: the stage-a chunk rows have an
+empty `summary` field. The extra `-q` is removed, so each chunk row's `summary` and each step log
+end with the passed/failed counts. `check` used a single `-q` and already printed it (stage a:
+"239 passed").
+
+### Why first detections come late: the mechanism, checked (owner request, 2026-10-31)
+
+**The owner's proposed mechanism:** Hypothesis generates small examples first and builds larger
+ones from earlier examples, so examples are not independent and deep plans or multi-run shapes
+appear late.
+
+**Test 1: plan size by example index.** Generation is pinned, and Hypothesis's choices do not
+depend on test outcomes while every example passes. So rerunning the correct-code shapes
+properties at the five rate seeds regenerates the rate runs' examples. Each plan's JSON node
+count, top-level steps and depth were recorded by example index
+(`results/phase3b/plan_sizes.jsonl`, 15,000 examples; `plan_sizes_long.jsonl`, NI-5 at seed
+202616004 to 3,000; script `scratchpad/sizes.py`).
+
+| property | examples 1–50 | 51–200 | 201–500 | 501–1,000 | 1,001–4,000 |
+|---|---|---|---|---|---|
+| NI: mean plan nodes (mean top-level steps) | 61 (2.9) | 84 (3.8) | 85 (4.0) | 80 (3.7) | 74 (3.4) |
+| NI-5 | 69 (3.1) | 79 (3.6) | 87 (4.1) | 83 (3.7) | 93 (4.8) |
+| NI-5, seed 202616004 to 3,000 | 78 (3.6) | 88 (4.1) | 89 (4.2) | 85 (3.9) | 76–84 (3.6–4.0) |
+| multirun: random plans per example | 0.86 | 0.41 | 0.46 | 0.39 | 0.37 |
+
+- **Small examples first: true, but only for the first ~50 examples.** After that, plan size,
+  steps and depth (17 or more levels in 12–26% of plans in every window) are flat.
+- So the size ramp does not explain first detections at 1,231–2,681. Deep plans are as common
+  at example 100 as at example 2,000.
+- In multirun the early examples draw *more* random plans, not fewer.
+
+**Test 2: are detections clustered?** Every violation index of "goodwill rule ignores amount",
+shapes NI, five rate seeds × 3,000 examples (`results/phase3b/violation_indices.jsonl`; script
+`scratchpad/viol_idx.py`). Violations per window of 250 examples:
+
+| seed | violations | first | per 250-example window | variance / mean |
+|---|---|---|---|---|
+| 202616001 | 8 | 224 | 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6 | 4.4 |
+| 202616002 | 22 | 205 | 7, 0, 9, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0 | 5.9 |
+| 202616003 | 13 | 1,596 | 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 6, 0 | 5.5 |
+| 202616004 | 67 | 168 | 10, 14, 3, 9, 0, 4, 0, 6, 0, 0, 11, 10, 0 | 4.7 |
+| 202616005 | 13 | 1,741 | 0, 0, 0, 0, 0, 0, 3, 0, 7, 0, 0, 3, 0 | 4.2 |
+
+Independent examples would give a ratio near 1. Detections come in **bursts** (3–14 in one
+window), separated by stretches of 1,000–2,500 examples with none.
+
+**The mechanism the data supports:** Hypothesis builds new examples by mutating and splicing
+earlier ones. Once it generates an example in a detecting region, the next examples stay near
+it, and a burst follows; then it moves away. Late first detection is waiting for the first
+burst. The independent unit is the burst, not the example. Plan size is not the cause.
+
+**Consequence for the accepted budget rule.** `W + ln(1000)/p` counts examples as independent
+after the warm-up, so it is optimistic. For goodwill-amount, about 16 bursts in 15,000
+examples means roughly one burst per 940 examples. At its budget of 3,000 that gives a
+per-seed miss probability of roughly `exp(-3000/940)`, about 4%, not 0.1%. This is an estimate
+from one mutant; the budgets are not changed on it. The fresh-seed validation below measures
+the misses, and a corrected budget is reported separately.
+
+### Validation at fresh seeds (owner, 2026-10-31)
+
+- **Seeds:** stage b's `mutant-verify` runs every (property, source) budget at three seeds,
+  `VERIFY_SEEDS` = 202617001, 202617002 and 202617003. None was used to set a budget; the rates
+  used 202616001–202616005, and the `check` witnesses use rate seeds.
+- **Each run** stops at its first violation and records the example index (`detected_at`).
+- **A required row that misses** is a miss against the D-056 rule. It makes the step exit 1 and
+  is followed by an `extend` run at the same seed, four times the budget, which records where
+  detection actually came.
+- **Budgets are not raised in place.** Each miss and its corrected budget are reported in a
+  separate table here.
+- The per-budget count runs of the earlier verify design are dropped; the rates already
+  measured them, and the time goes to the extra seeds.
+
+**Already observed (in session, before stage b).** A smoke test of the new verify on NI-5 ran
+the real seeds. The tree differed from 0927aef only in the verify harness, not in generator or
+kernel code, and generation is pinned, so stage b reproduces these exactly:
+
+| mutant | seed | budget | result |
+|---|---|---|---|
+| NI-5: re-check treats a relaxed verdict as stricter | 202617001 | 8,000 | caught at 432 |
+| same | 202617002 | 8,000 | **missed**; `extend` (32,000): first detection at 9,080, 32 violations in 34,350 calls |
+| same | 202617003 | 8,000 | caught at 525 |
+
+This is a miss against the D-056 rule, as the burst analysis predicts. The verify seeds are kept
+as they are: changing them after seeing a miss would be choosing seeds by result. More misses
+are expected in stage b (goodwill-amount, about 4% per seed by the burst estimate).
+
+## D-057 Held-out mutants at Gate 3 (owner, 2026-10-31)
+
+The shape generator has been adjusted while known mutants were being measured (D-049 to D-056).
+So "every mutant is caught" is weaker evidence than it looks: the generator and the mutant list
+are no longer independent.
+
+At Gate 3, a separate reviewer subagent writes 3 to 5 new mutants. It sees only `docs/DESIGN.md`
+and `kernel/`: not `planners/`, not `tests/`, not the existing mutant list, not these results.
+- Each mutant is a small change to the kernel that the reviewer believes violates the invariant.
+- Each runs against the shapes and grammar properties at the set budgets and at `SEED`, from a
+  clean state.
+- The result is reported separately, as the held-out mutant result: caught or missed, with the
+  counterexample or the number of examples run.
+- **The generator is not changed before that report.** A miss is reported as a miss, then
+  analysed; any fix is a new decision with its own re-measurement.
+
+Rejected: *writing the held-out mutants myself* (I know the generator); *letting the reviewer
+see the existing mutants* (it would write variations of them).
+
+## Phase 3 owner run: stage b results (commit c4b52a6, verified 2026-11-01)
+
+Eleven steps, 10 passed. Every row of `results/phase3b-run/steps.jsonl` is at c4b52a6 with a
+clean tree before and after. Every pytest step's log now ends with its summary line.
+
+| step | exit | time | result |
+|---|---|---|---|
+| `check` | 0 | 56 s | 250 passed in 51.04 s; ruff, format, mypy clean |
+| `mutant-verify` | **1** | 2,806 s | 97 rows. Every required mutant caught at all three fresh seeds except the NI-5 mutant at 202617002 (below) |
+| NI statistics, shapes, single-run | 0 | 32 s | 2,000 passing, 0 failing, 73 invalid; "1 passed" |
+| NI statistics, shapes, multirun | 0 | 24 s | 2,000 passing, 0 failing, 267 invalid |
+| NI statistics, shapes, NI-5 | 0 | 18 s | 2,000 passing, 0 failing, 146 invalid |
+| NI statistics, grammar, single-run | 0 | 33 s | 2,000 passing, 0 failing, 102 invalid |
+| NI statistics, grammar, multirun | 0 | 33 s | 2,000 passing, 0 failing, 121 invalid |
+| NI statistics, grammar, NI-5 | 0 | 21 s | 2,000 passing, 0 failing, 216 invalid |
+| fuzz chunks, grammar single-run | 0 | 172 s | 10 × 1,000 (seeds 202614800–809), 0 failing, 619 invalid |
+| fuzz chunks, grammar multirun | 0 | 178 s | 10 × 1,000 (202614900–909), 0 failing, 601 invalid |
+| fuzz chunks, grammar NI-5 | 0 | 116 s | 10 × 1,000 (202615000–009), 0 failing, 1,072 invalid |
+
+Peak RSS of a fuzz chunk: at most 117.4 MB.
+
+**Budget validation at fresh seeds (D-056 rule):**
+- Every shapes mutant at its property budget, and every `GRAMMAR_CATCHES` mutant at the NI grammar
+  budget, was caught at all three fresh seeds (202617001–003), except one.
+- **The miss:** the NI-5 mutant at seed 202617002, budget 8,000. The `extend` run (32,000) first
+  caught it at 9,080, with 32 violations in 34,350 calls. This is exactly the in-session smoke
+  result (D-056 "Validation"), as pinned generation predicts.
+- Latest detections among the catches: "extraction ignores control" at 1,954 and 1,916 (budget
+  3,000); grammar "map body pc" at 1,787 (budget 4,000).
+
+**Grammar coverage rows:** 36 rows (12 mutants not in `GRAMMAR_CATCHES` × 3 seeds); 2 caught.
+"Goodwill rule ignores origin set", grammar NI, was caught at 839 and 1,911, the first grammar
+detections of a declassification-rule mutant. At the rate seeds it had 0 in 5,298, so it stays
+out of `GRAMMAR_CATCHES`.
+
+**NI statistics** (Hypothesis's event percentages over all examples):
+
+| | shapes | grammar | stage a (mixed, shapes part) | Gate 2 |
+|---|---|---|---|---|
+| single-run: pairs with no halt (NI-1 checked) | 73.4% | 74.3% | 71% | 100% |
+| single-run: NI-3 constrained effects | 28.8% | 2.6% | 25% | 46% |
+| NI-5: approval requested | 8.7% | 0.4% | | |
+| NI-5: run halted | 17.2% | 16.6% | | |
+| multirun: run 1 / run 2 halted | about 7% / 9% | 14.5% / 13.3% | | |
+
+**Memory with Claude Code closed** (owner): free RAM fell to 182 MB before step 7. Between fuzz
+chunks it fell further: 47.5 MB before the last grammar NI-5 chunk, and 88.8 and 110.7 MB before
+two others. The chunks still passed (peak RSS at most 117 MB). Recorded in D-055 for Phase 4.
+
+## D-058 Mutant detection as k independent seeds (owner, 2026-11-01; final redesign)
+
+**Why.** Within one seed, detections come in bursts (D-056), so one long run cannot support a
+miss-probability claim. Seeds are independent: each starts its own pseudo-random stream in a
+fresh process with pinned generation. So the claim is made across seeds.
+
+**Design.** For each required mutant, k seeds of n examples; the mutant is caught if any seed
+catches it.
+- `q` = the probability that one seed of n examples catches the mutant.
+- **Estimated from every clean-state seed measured:** the 5 rate seeds (5 extended to 4,000 or
+  more when they had 0 at 1,000) and the 3 stage-b seeds (run to their budget, or extended).
+  That makes 8 seeds per mutant, each with a known first detection.
+- A seed counts as catching within n if its first detection is at most n. `n` is chosen only
+  where every seed's outcome at n is known.
+- `q_low` = the exact one-sided 95% Clopper–Pearson lower bound on x caught of 8.
+- `k` = the smallest k with `(1 - q_low)^k <= 1%`.
+- `n` is chosen from a fixed grid (250, 500, 1,000, 1,500, 2,000, 3,000) to minimise k·n.
+- **Impractical** (fixed before computing): k·n above 50,000 examples for one mutant. That is
+  about 15 minutes, and would be called a coverage gap.
+- Computed by `scratchpad/kseed.py`, written to `results/phase3b/kseed_design.json`, and set in
+  `KSEED` in `tests/test_ni_mutants.py`.
+
+| property | source | mutant | first detections (8 seeds) | n | x/8 | q_low | k | k·n | est. miss |
+|---|---|---|---|---|---|---|---|---|---|
+| NI | shapes | at ignores index label | 7 … 815 | 250 | 6 | 0.400 | 10 | 2,500 | 0.6% |
+| NI | shapes | extraction ignores control | 359 … 1,954 | 2,000 | 8 | 0.688 | 4 | 8,000 | 0.95% |
+| NI | shapes | extractor output labelled trusted | 3 … 30 | 250 | 8 | 0.688 | 4 | 1,000 | 0.95% |
+| NI | shapes | filter ignores predicate labels | 3 … 359 | 500 | 8 | 0.688 | 4 | 2,000 | 0.95% |
+| NI | shapes | goodwill rule ignores amount | 146 … 1,741 | 250 | 4 | 0.193 | 22 | 5,500 | 0.9% |
+| NI | shapes | goodwill rule ignores origin set | 10 … 850 | 1,000 | 8 | 0.688 | 4 | 4,000 | 0.95% |
+| NI | shapes | map body pc ignores list structure | 5 … 359 | 500 | 8 | 0.688 | 4 | 2,000 | 0.95% |
+| NI | shapes | ownership rule drops uniqueness | 3 … 244 | 250 | 8 | 0.688 | 4 | 1,000 | 0.95% |
+| NI | shapes | ownership rule ignores origin set | 107 … 430 | 500 | 8 | 0.688 | 4 | 2,000 | 0.95% |
+| NI | shapes | point read of a missing trusted ticket does not halt | 3 … 184 | 250 | 8 | 0.688 | 4 | 1,000 | 0.95% |
+| NI | shapes | policy ignores pc | 10 … 154 | 250 | 8 | 0.688 | 4 | 1,000 | 0.95% |
+| multirun | shapes | execution writes no record before the provider call | 93 … 933 | 1,000 | 8 | 0.688 | 4 | 4,000 | 0.95% |
+| multirun | shapes | goodwill rule drops the per-customer bound | 42 … 201 | 250 | 8 | 0.688 | 4 | 1,000 | 0.95% |
+| multirun | shapes | ownership rule drops never-refunded order | 3 … 513 | 250 | 5 | 0.289 | 14 | 3,500 | 0.8% |
+| multirun | shapes | ownership rule drops once-per-ticket across runs | 29 … 1,231 | 250 | 4 | 0.193 | 22 | 5,500 | 0.9% |
+| NI-5 | shapes | re-check treats a relaxed verdict as stricter | 253 … 9,080 | 1,000 | 5 | 0.289 | 14 | 14,000 | 0.8% |
+| NI | grammar | extractor output labelled trusted | 86 … 829 | 250 | 5 | 0.289 | 14 | 3,500 | 0.8% |
+| NI | grammar | map body pc ignores list structure | 86 … 1,787 | 250 | 4 | 0.193 | 22 | 5,500 | 0.9% |
+| NI | grammar | point read of a missing trusted ticket does not halt | 91 … 361 | 500 | 8 | 0.688 | 4 | 2,000 | 0.95% |
+| NI | grammar | policy ignores pc | 122 … 795 | 1,000 | 8 | 0.688 | 4 | 4,000 | 0.95% |
+
+**Reading.**
+- No required mutant needs an impractical k·n; the largest is the NI-5 mutant at 14,000. There
+  is no coverage gap among the required mutants.
+- The two grammar coverage rows with any detection would need k·n of 179,750 (filter predicate
+  labels, 1 of 8 seeds) and 719,000 (goodwill origin set, 1 of 8 within 1,000). They are coverage
+  gaps of the grammar generator, as D-056 already reported, and stay out of `GRAMMAR_CATCHES`.
+- With 8 seeds, the best possible `q_low` is 0.688 (8 of 8). So k is at least 4 for every
+  mutant: the design is limited by how many seeds were measured, not by the mutants.
+- **Optimism in the estimate:** n is picked from the grid on the same 8 seeds it is evaluated
+  on. The estimate also rests on the Clopper–Pearson bound with 8 observations. It is an
+  estimate at the 1% level, not a measured miss rate.
+- **The stage-b miss stays in the record.** NI-5 at seed 202617002 is one of the 8 seeds
+  (first detection 9,080). It is why the NI-5 design needs k = 14.
+
+**Where it runs.**
+- `check` keeps the exact-replay witnesses (D-056).
+- The k-seed designs run in the owner-run `phase3-run --stage c` (`mutant_rates.py kseed`), at
+  seeds 202618001 onwards. None of these was used to estimate q, so the run tests the design.
+- The held-out mutants (D-057) run at each property's largest n and largest k (`HELDOUT_DESIGN`):
+  - NI shapes: 22 seeds × 2,000;
+  - NI grammar: 22 × 1,000;
+  - multirun shapes: 22 × 1,000;
+  - NI-5 shapes: 14 × 1,000.
+
+  A held-out mutant is caught if any seed of any of these catches it.
+- **This is the last redesign** (owner). Whatever stage c or the held-out run shows is reported
+  as it is.
+
+Rejected:
+- *Pool examples across seeds into a rate:* the bursts make that rate's binomial bound wrong
+  (D-056).
+- *Wilson bound:* with 8 of 8 it gives about 0.68, close to Clopper–Pearson. The exact bound
+  avoids arguing about approximations at small m.
+- *Measuring more seeds first to shrink k:* the owner asked for no further iteration.
+
+## Gate 3 independent review: responses (2026-11-01)
+
+**The reviewer.** A fresh subagent, given `docs/THREAT_MODEL.md`, `docs/DESIGN.md`, `docs/SPEC.md`,
+the code and the earlier review files. For the two owner-requested checks it also got three
+extracts: the D-054 test table, the earlier mutant decisions (D-033, D-049, D-050, D-054), and the
+clean-state evidence (stage b and D-058). It did not get evaluation results or the rest of this
+log. The report is verbatim in `docs/reviews/GATE3_REVIEW.md` (commit 6fd8e31).
+- It disclosed that a grep showed it four lines of `tests/heldout_mutants.py`. It did not use
+  them.
+
+**Reproduced by me.** I reran the reviewer's deterministic probes (session scratchpad
+`gate3/rev/`):
+- the recovery race (finding 1): order 7000 refunded twice, no refund row after run 1;
+- the D-054 probe F (finding 2): four executed credits for customer 100;
+- the stricter-stop probe (finding 3): `partial` on the real kernel;
+- the reviewer's never-stops mutant, applied as a pytest plugin to the whole suite except
+  `test_ni_mutants.py`: **229 passed**, so no test notices it;
+- findings 6 and 7: the approver exception (no audit row, then an IntegrityError on retry), the
+  escaped leaked-ticket halt, and the in-run per-customer credit bound backstopped by the
+  re-check (`partial`, one credit).
+
+One assertion in the reviewer's `test_inrun_customer_bound.py` expects `executed` under the
+single mutant and fails (`partial`). Its own report says the re-check backstops this case, so
+the report is right and that assertion is stale.
+
+**Nothing is fixed before the owner's decision.** Findings 1–3 change the kernel or its stated
+concurrency model, which is a direction decision. Proposed responses:
+
+| # | finding | severity | proposed response |
+|---|---|---|---|
+| 1 | `recover()` in a concurrent run deletes another run's in-flight pending row; the record is lost and the rule admits a second refund | high | **Real; reproduced.** DESIGN never states single-writer. Serialize runs on one database with a run lock taken before `recover()` and held through execution. Check the rowcount of the `provider_ref` UPDATE and fail loudly when it is 0. Add the reviewer's probe as a regression test. Then state the concurrency model in DESIGN and THREAT_MODEL. |
+| 2 | Since D-054 a plain-read credit skips the goodwill rule, so the per-customer bound no longer applies; probe F executes four credits | medium | **Real; a D-054 cost the record missed.** Move the per-customer and per-ticket credit bounds into the credit's P3 checks, so they hold for trusted credits too; restore probe F's original form as a test. Correct the D-054 table row 7 (below). |
+| 3 | The "stop on a stricter verdict between effects" check is tested by nothing | medium | **Real.** Add the reviewer's mid-run probe as a regression test, and add a "re-check never stops" mutant to the suite with a deterministic test (the NI generators cannot produce a concurrent writer). |
+| 4 | Reads of untrusted ticket ids and their existence origin are no longer generated or asserted | low–medium | **Real harness gap from D-054.** Add a label unit test for the untrusted-id `@row`. The `exists` control in `_lit_extract` is dead for NI-1 (also recorded in D-056). Fix `test_case_ticket_existence_is_endorsable_by_the_rule` or rename it. |
+| 5 | NI checks integrity only; removing the P5 sink check goes unnoticed | low | **Accepted as scope:** NI is the integrity invariant. Correct DESIGN §9.4, which lists `order_stats` shapes as NI coverage, and add a sink mutant against `test_tools_phase2.py`. |
+| 6 | The NI-4 goodwill oracle has no in-run per-customer check | low | Add it to `_check_goodwill`. |
+| 7 | An approver that raises, or a leaked missing ticket, leaves no audit row | low | Audit the failure and mark the approval rejected. Nothing executes today. |
+| 8, 9 | NI-3 and NI-5 versus partial runs; what the harness does not compare or generate | low | Document them in DESIGN §9 as harness limits. Fix the "in execution order" wording in DESIGN §9.2, since `effects()` groups by table. |
+
+**D-054 test table: corrections from the review.**
+- **Row 7** (`test_goodwill_credits_are_bounded_per_customer_not_only_per_ticket`): **weaker, not
+  equal.** The original probe F (plain reads) now executes four credits. The test only covers
+  text-triggered credits.
+- **Rows 6 and 12:** their "NI-3 holds" / "NI-1-clean" calls are vacuous when one side halts. The
+  evidence is the halt assertions.
+- **Row 5's caveat:** nothing now covers the untrusted-id half of the existence origin (finding 4).
+- **Missed by the table:** `test_case_ticket_existence_is_endorsable_by_the_rule` changed meaning
+  without changing its assertions, because its input no longer reaches `@row`. The table's method,
+  which lists changed assertions, cannot see tests whose input stopped reaching the mechanism.
+
+**Earlier mutant claims** (review, 30 rows):
+- Every mutant named in D-033, D-049, D-050 and D-054 is re-established from a clean state by the
+  witnesses and the stage-b seeds.
+- Not re-established: the old budget and rate figures ("all 10 caught at 600", the D-049 rates,
+  "970 runs"). They are superseded by D-056 and D-058.
+- Two Gate 1 mutants were never in the suite: "ownership rule ignores amount" and "contains
+  ignores list labels". The reviewer reproduced both as caught; they are not part of the
+  project's evidence.
+- **Mis-specified mutants:**
+  - Both "ignores origin set" mutants also drop the rules' trust preconditions. The reviewer's
+    narrow versions are caught too (3/3).
+  - "Goodwill rule ignores amount", "map body pc", "policy ignores pc" and "extraction ignores
+    control" are broader than their names.
+  - The NI-5 reversal is caught only through its relaxation half (finding 3).
+- **Stage c (k-seed) has not run.** Every k-seed figure is a design, not a result.
+
+## Held-out mutants (D-057): result so far
+
+**Writer.** A fresh subagent that read only `docs/DESIGN.md` and `kernel/`. It reports that
+DESIGN §9.4 names the existing mutants by mechanism, so it was blind to the generator and the
+tests, but not fully to the mutant list. It deliberately avoided those mechanisms.
+
+Five mutants, in `tests/heldout_mutants.py` (commit b565630, added unchanged):
+1. **`ownership_amount_at_most_refundable`:** the ownership rule admits any amount up to the
+   refundable amount, not exactly it.
+2. **`goodwill_reason_not_required_trusted`:** the goodwill rule no longer requires a trusted
+   `reason`.
+3. **`contains_ignores_element_labels`:** `contains` takes only the list's outer label.
+4. **`order_note_labelled_trusted`:** the labelling map loses `orders.customer_note`.
+5. **`approval_hash_not_compared`:** approval consumption ignores the hash.
+
+**Run** (in session, `mutant_rates.py heldout`, `results/phase3b/heldout.jsonl`). Each mutant runs
+against NI grammar, then NI shapes, then multirun shapes, then NI-5 shapes, at
+`HELDOUT_DESIGN`, and stops at the first seed that catches it. Claude Code's memory guard stopped
+the run partway; it was not restarted in session.
+
+| mutant | result |
+|---|---|
+| ownership amount at most refundable | **caught**: NI grammar, seed 202618007, example 862 (after 6 seeds missed) |
+| goodwill reason not required trusted | **missed at every design**: NI grammar 22 × 1,000, NI shapes 22 × 2,000, multirun 22 × 1,000, NI-5 14 × 1,000 (107,000 calls) |
+| contains ignores element labels | incomplete: NI grammar 21 of 22 seeds missed when the run was stopped |
+| order note labelled trusted | not run |
+| approval hash not compared | not run |
+
+**Why the goodwill-reason miss happens** (analysed after the result; nothing changed):
+- The shapes pass every credit `reason` as a literal (`planners/fuzz.py` credit shape).
+- The grammar draws `reason` from the enum pool three times in four.
+- No payload is ever exactly `goodwill` or `late_delivery`.
+- So no generated plan has an untrusted credit reason that also passes the enum check, and the
+  mutant cannot produce a violation. **A coverage gap that no known mutant exposed.** The analogous
+  `close_ticket` resolution is drawn from text in the shapes; the credit reason is not.
+- Per D-057, the generator is not changed before this report.
+
+The complete held-out run, at one commit, is in the owner-run stage c (`mutant-heldout`).
+
+## Gate 3 baseline: stage c results (commit 7da1652, verified 2026-11-02)
+
+The owner ran `phase3-run --stage c` with Claude Code closed. Three steps, all exit 0, every row
+at 7da1652, tree clean before and after (`results/phase3c/steps.jsonl`).
+
+| step | exit | time | result |
+|---|---|---|---|
+| `check` | 0 | 47 s | 250 passed in 43.97 s |
+| `mutant-kseed` | 0 | 536 s | 170 rows; every required mutant caught by at least one of its k seeds |
+| `mutant-heldout` | 0 | 4,122 s | 248 rows; 2 of 5 held-out mutants caught, 3 missed at every design |
+
+**k-seed designs at fresh seeds 202618001 onwards** (D-058; seeds caught / seeds run, against the
+design's `q_low`):
+
+| property | source | mutant | n × k | seeds caught | design q_low | caught |
+|---|---|---|---|---|---|---|
+| NI | shapes | at ignores index label | 250 × 10 | 8/10 (80%) | 0.400 | yes |
+| NI | shapes | extraction ignores control | 2,000 × 4 | 3/4 (75%) | 0.688 | yes |
+| NI | shapes | extractor output labelled trusted | 250 × 4 | 4/4 | 0.688 | yes |
+| NI | shapes | filter ignores predicate labels | 500 × 4 | 3/4 (75%) | 0.688 | yes |
+| NI | shapes | goodwill rule ignores amount | 250 × 22 | 12/22 (55%) | 0.193 | yes |
+| NI | shapes | goodwill rule ignores origin set | 1,000 × 4 | **2/4 (50%)** | 0.688 | yes |
+| NI | shapes | map body pc ignores list structure | 500 × 4 | 4/4 | 0.688 | yes |
+| NI | shapes | ownership rule drops uniqueness | 250 × 4 | **2/4 (50%)** | 0.688 | yes |
+| NI | shapes | ownership rule ignores origin set | 500 × 4 | 4/4 | 0.688 | yes |
+| NI | shapes | point read of a missing trusted ticket does not halt | 250 × 4 | 4/4 | 0.688 | yes |
+| NI | shapes | policy ignores pc | 250 × 4 | 4/4 | 0.688 | yes |
+| NI | grammar | extractor output labelled trusted | 250 × 14 | 7/14 (50%) | 0.289 | yes |
+| NI | grammar | map body pc ignores list structure | 250 × 22 | 9/22 (41%) | 0.193 | yes |
+| NI | grammar | point read of a missing trusted ticket does not halt | 500 × 4 | 4/4 | 0.688 | yes |
+| NI | grammar | policy ignores pc | 1,000 × 4 | 4/4 | 0.688 | yes |
+| multirun | shapes | execution writes no record before the provider call | 1,000 × 4 | 4/4 | 0.688 | yes |
+| multirun | shapes | goodwill rule drops the per-customer bound | 250 × 4 | 4/4 | 0.688 | yes |
+| multirun | shapes | ownership rule drops never-refunded order | 250 × 14 | 12/14 (86%) | 0.289 | yes |
+| multirun | shapes | ownership rule drops once-per-ticket across runs | 250 × 22 | 12/22 (55%) | 0.193 | yes |
+| NI-5 | shapes | re-check treats a relaxed verdict as stricter | 1,000 × 14 | 9/14 (64%) | 0.289 | yes |
+
+**Reading.**
+- All 20 required mutants were caught. No design missed.
+- Two observed per-seed shares fall below their design's lower bound. "Goodwill rule ignores origin
+  set" and "ownership rule drops uniqueness" were each caught at 2 of 4 seeds, against
+  `q_low = 0.688`.
+  - At an observed share of 0.5, k = 4 gives an estimated miss probability of about 6%, not 1%.
+  - So the 8-seed estimates were optimistic for those two. The n was chosen on the same seeds it
+    was evaluated on, the bias D-058 warned about.
+  - No tuning follows (owner: no further iteration). The fresh-seed shares are now part of the
+    record, and the stage-d run measures them again at new seeds.
+
+**Held-out mutants (D-057)**, at `HELDOUT_DESIGN`, stopping at the first catching seed:
+
+| held-out mutant | result | examples run |
+|---|---|---|
+| ownership amount at most refundable | caught: NI grammar, seed 202618007, example 862 | 7,197 |
+| goodwill reason not required trusted | **missed at every design** | 108,462 |
+| contains ignores element labels | **missed at every design** | 108,462 |
+| order note labelled trusted | caught: NI grammar, seed 202618001, example 664 | 664 |
+| approval hash not compared | **missed at every design** | 108,462 |
+
+**Three permanent held-out misses**, each analysed after the result, with no generator change
+before it:
+- **Goodwill reason:** no generator produces an untrusted credit reason that is also a valid
+  reason code (Gate 3 responses).
+- **`contains` element labels:**
+  - The mutant matters only when `contains` runs over a list whose structure is trusted but whose
+    elements carry untrusted labels, and its result then selects an effect.
+  - The shapes never build such a list (a `map` result over trusted rows whose body reads an
+    untrusted field), and the grammar did not in 108,462 examples.
+  - The reviewer's narrower "contains ignores list labels" mutant (structure label dropped) was
+    caught; this one is about element labels.
+- **Approval hash:**
+  - The NI-5 harness's approver always answers with the current run's hash. So a run whose
+    executed set differs from the approved set is never constructed (review finding 8).
+  - Approval binding is tested by unit tests (replay, cross-run), but the property-based harness
+    cannot see this mutant.
+
+These three stay in RESULTS as misses. Post-fix results are reported separately; the three no
+longer count as held out once the generators change.
+
+## D-059 History scan before publishing (2026-11-02)
+
+Scope: every commit on every branch (43 commits), content and messages (`git log --all -p`).
+- **Secrets:** none. No tokens (`gho_`, `ghp_`, `github_pat`), no cloud keys (`AKIA`, `sk-`), no
+  private keys, no passwords. The `sk-` pattern matched only words such as "task-specific".
+- **Personal data:** only the owner's commit identity (author name and e-mail, 43 commits). No
+  other names or addresses.
+- **Local paths:** 10 lines in DECISIONS and CLAUDE.md (worktree commands) contain absolute
+  Windows paths with the local user name. No temp-folder paths.
+- **Session-local references:** some DECISIONS entries cite diagnostic scripts by their session
+  scratchpad name; those scripts are not in the repository.
+
+**Decision: no history rewrite.** Nothing secret is exposed, and the user name is a prefix of the
+public account name. The current tree replaces the paths with `<repo>` and `<worktree-…>`
+placeholders. History keeps them. The owner can still choose a rewrite before making the
+repository public; that needs the owner's yes (delegation limit a).

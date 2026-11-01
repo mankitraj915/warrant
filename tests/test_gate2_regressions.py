@@ -19,7 +19,6 @@ from kernel.run import Environment, RunResult, run_plan, run_task
 from planners.builders import (
     Json,
     call,
-    credit_ticket_customer,
     expr,
     filter_,
     lit,
@@ -30,7 +29,7 @@ from planners.builders import (
     refund_from_ticket_text,
 )
 from planners.fuzz import CASE_CUSTOMER, CASE_TICKET, _case_world, raw_extractor
-from planners.oracle import OraclePlanner, refund_amount
+from planners.oracle import OraclePlanner, credit_if_order_mentioned, refund_amount
 from tests.ni_properties import check_ni1, check_ni3, effects
 
 # --- findings 1 and 2: the cumulative extraction label --------------------------------
@@ -211,13 +210,16 @@ def test_a_rule_admitted_refund_is_logged_before_the_provider_is_called() -> Non
 
 
 def test_goodwill_credits_are_bounded_per_customer_not_only_per_ticket() -> None:
-    """Probe F: one customer opening four tickets got four automatic credits."""
+    """Probe F: one customer opening four tickets got four automatic credits. Each
+    credit is triggered by its ticket's text (since D-054 a credit to an operator-named
+    ticket's customer with no text involved is trusted and needs no rule)."""
     world = _case_world(1, "in_transit").extend(
-        tickets=tuple(Ticket(t, CASE_CUSTOMER, "hi", "late again") for t in (4002, 4003, 4004))
+        tickets=tuple(Ticket(t, CASE_CUSTOMER, "hi", "late #7000") for t in (4002, 4003, 4004))
     )
+    world = world.replace_text("tickets", CASE_TICKET, "body", "late #7000")
     env = Environment(materialize(world), PaymentMock(), raw_extractor)
     outcomes = [
-        run_plan(credit_ticket_customer(t), env, run_id=f"f-{t}").outcome
+        run_plan(credit_if_order_mentioned(t, 10_000, "goodwill"), env, run_id=f"f-{t}").outcome
         for t in (CASE_TICKET, 4002, 4003, 4004)
     ]
     assert outcomes == ["executed", "needs_approval", "needs_approval", "needs_approval"]

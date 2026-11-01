@@ -29,7 +29,7 @@ from .interpreter import Interpreter, ResolvedAction
 from .labels import STAR, Label, join
 from .plan_lang import PlanRejected, check_plan, parse_plan
 from .policy import Verdict, decide
-from .tools.database import Database, lossless_text
+from .tools.database import Database, ResolutionHalted, lossless_text
 from .tools.registry import signatures
 from .values import Record, Scalar, UnitV, plain, whole_label
 
@@ -41,6 +41,7 @@ Outcome = Literal[
     "approval_invalid",
     "rejected",
     "aborted",
+    "halted",  # resolution stopped: an operator-named ticket does not exist (D-054)
     "partial",
     "indeterminate",
     "executing",  # only in the write-ahead "decided" audit row
@@ -166,7 +167,10 @@ def _decide_and_execute(
 
     db = Database(env.db)
     interpreter = Interpreter(db, env.extractor, plan_label)
-    actions = tuple(interpreter.resolve(plan))
+    try:
+        actions = tuple(interpreter.resolve(plan))
+    except ResolutionHalted as exc:
+        return RunResult(run_id, "halted", str(exc), plan_label=plan_label)
     verdicts, log = decide(actions, db.trusted)
     answer_label = whole_label(interpreter.answer)
     result = RunResult(

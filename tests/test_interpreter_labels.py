@@ -9,9 +9,9 @@ from planners.fuzz import CASE_TICKET, _case_world
 from tests.support import run_world
 
 BODY = f"tickets[{CASE_TICKET}].body"
-# Customers can open tickets, so a ticket read carries its row's existence origin
-# (Gate 1 review #1): everything inside a map over read_ticket has it in its pc.
-ROW = f"tickets[{CASE_TICKET}].@row"
+# Customers can open tickets, so a ticket's existence is untrusted (Gate 1 review #1).
+# Since D-054 a read of an operator-named (trusted) ticket id that finds no row halts
+# the run, so within a run the row exists and the read carries no existence origin.
 
 
 def world(body: str | bytes = "Refund #7000") -> World:
@@ -47,11 +47,13 @@ def test_literals_inside_a_tainted_map_stay_trusted_but_pc_is_tainted() -> None:
         "ticket_id": frozenset(),
         "order_id": frozenset(),
         "amount": frozenset(),
-        "pc": frozenset({BODY, ROW}),
+        "pc": frozenset({BODY}),
     }
 
 
-def test_ticket_read_taints_only_with_the_tickets_existence() -> None:
+def test_read_of_an_operator_named_ticket_is_trusted() -> None:
+    """Its customer and that customer's orders select nothing untrusted (D-054; this
+    test asserted the existence origin before)."""
     p = plan(
         call("read_ticket", "t", ticket_id=lit(CASE_TICKET)),
         expr(
@@ -68,9 +70,9 @@ def test_ticket_read_taints_only_with_the_tickets_existence() -> None:
     for i in range(2):
         assert labels_of(result, i) == {
             "ticket_id": frozenset(),
-            "order_id": frozenset({ROW}),
-            "amount": frozenset({ROW}),
-            "pc": frozenset({ROW}),
+            "order_id": frozenset(),
+            "amount": frozenset(),
+            "pc": frozenset(),
         }
 
 
@@ -81,7 +83,7 @@ def test_filter_joins_every_predicate_label_into_the_structure() -> None:
         expr(map_(ref("sel"), "s", refund(lit(7000), lit(10)))),
     )
     result, _, _ = run_world(p, world())
-    assert labels_of(result)["pc"] == {BODY, ROW}
+    assert labels_of(result)["pc"] == {BODY}
 
 
 def test_tainted_index_taints_the_selected_record() -> None:
@@ -99,7 +101,7 @@ def test_tainted_index_taints_the_selected_record() -> None:
         ),
     )
     result, _, _ = run_world(p, world())
-    assert labels_of(result)["order_id"] == {BODY, ROW}
+    assert labels_of(result)["order_id"] == {BODY}
 
 
 def test_amount_selected_by_tainted_id_is_tainted() -> None:
@@ -114,7 +116,7 @@ def test_amount_selected_by_tainted_id_is_tainted() -> None:
         )
     )
     result, _, _ = run_world(p, world())
-    assert labels_of(result)["amount"] == {BODY, ROW}
+    assert labels_of(result)["amount"] == {BODY}
 
 
 def test_order_note_fields_carry_their_own_origin() -> None:

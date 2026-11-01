@@ -93,10 +93,18 @@ schema and part of the TCB:
 - **Row existence.** Keys are trusted. Rows of most tables are created by trusted processes;
   an order exists only through checkout and payment. **Tickets are different:** any customer,
   including the attacker, can open them (review finding 7), and ticket ids are predictable.
-  - A keyed lookup `read_ticket(T)` joins the existence origin `tickets[T].@row` into its
-    structure label, whether or not the row exists (Gate 1 review #1; this replaces D-021's
-    deferral). Everything computed under a `map` over a ticket read therefore has an untrusted
-    `pc`, and only a rule that endorses `tickets[T].@row` can let it act automatically.
+  - A keyed lookup `read_ticket(T)` of an *untrusted* id joins the existence origin
+    `tickets[T].@row` into its structure label, whether or not the row exists (Gate 1 review
+    #1; this replaces D-021's deferral). Everything computed under a `map` over such a read
+    has an untrusted `pc`, and only a rule that endorses `tickets[T].@row` can let it act
+    automatically.
+  - A keyed lookup of a *trusted* id (an operator-named ticket) that finds no row **halts the
+    run during resolution**: no action set exists, nothing executes, and the outcome is
+    `halted` (D-054, adopted in Phase 3 from the D-036 alternative). Within a run that
+    continues, the row therefore always exists, so its existence carries no information and
+    the read joins no existence origin. Existence can only suppress the whole run, which NI-3
+    permits. Without the halt, dropping the origin is unsound: existence becomes a count, an
+    index or a choice between maps (D-036). That is a mutant the harness must catch.
   - Enumerating tickets (any read tool that returns a *set* of tickets) joins an existence
     origin `tickets[*@C]` for each customer `C` whose tickets could appear into the structure
     label. A `map` over "all open tickets" therefore has an untrusted `pc`, and the number of
@@ -615,7 +623,9 @@ cumulative label (§3).
 
 - **NI-1 (trusted-action determinism).** The subsequence of `Res(P,E)` whose effective label
   (`⊔ args ⊔ pc`) is trusted is identical, as (site, tool, values), for `E1` and `E2`. It needs
-  no assumption about rules, so it is never vacuous.
+  no assumption about rules, so it is never vacuous. It is stated for pairs in which both runs
+  finish resolution: a run halted during resolution (§3, D-054) has no action set, and the
+  halt itself is whole-run suppression, covered by NI-3.
 - **NI-2 (policy soundness).** For every `E`, every `ALLOW`ed action is either fully trusted or
   every untrusted component is endorsed by a logged decision in `D(P,E)`.
 - **NI-3 (delimited release of effects, modulo whole-run suppression).** If
@@ -649,11 +659,28 @@ exception in either run fails the test.
 
 ### 9.4 Harness
 
-- Plans are compositions of hand-written shapes, not generated from the registry's types
-  (Gate 2 review #3). Amounts and predicates inside the shapes come from a small type-directed
-  expression generator. Every generated plan passes the checker. The guarantee covers every
-  well-typed plan; the fuzzer samples only the shapes listed here, so a passing fuzz run is
-  evidence about these shapes and nothing else.
+- Plans come from two generators (`planners.fuzz.plans(world, source)`): hand-written shapes
+  (Gate 2 review #3) and a grammar-based generator (`planners.grammar_fuzz`, Phase 3, D-053).
+  Each NI property (single-run, multi-run, NI-5) runs once per generator, as separate tests
+  with separate budgets, so grammar plans never take examples from the shapes (D-056).
+  - **Shapes.** Amounts and predicates inside them come from a small type-directed expression
+    generator.
+  - **Grammar plans.** These are arbitrary well-typed plans derived from the plan grammar and
+    the tool registry. Every expression is generated for an expected type from the names and
+    record fields in scope, per-type literal pools (the world's ids plus ids that name
+    nothing) and operators. `map`/`filter` nest up to `MAX_DEPTH`, plans have at most 40 steps,
+    and expressions are at most 2 operators deep. It is biased towards untrusted data in
+    control (D-056): half the plans open by extracting order ids from a record's text, and
+    iteration, `at`, `len` and `contains` prefer data derived from untrusted text, with mostly
+    consequential calls under it. It targets the labelling rules, not the declassification
+    rules.
+  - Every generated plan passes the checker.
+  - Hypothesis's statistics output counts each plan's source and, for grammar plans, each
+    construct used (every tool, operator, iteration depth, field path, consequential call under
+    a `map`).
+  - The guarantee covers every well-typed plan. The fuzzer samples a distribution over them,
+    so a passing run is evidence about that distribution. The grammar generator widens it
+    beyond the shapes, but it is not exhaustive.
 - The shapes are the known laundering patterns: selection by a tainted predicate, tainted `at`
   indices, `len` of tainted lists, money arithmetic on tainted values, nested `map`/`filter`,
   calls inside tainted `map` bodies with all-literal arguments, credits and closures under a
@@ -672,12 +699,17 @@ exception in either run fails the test.
   a new ticket. NI-2 and NI-4 (with its cross-run postconditions) are checked on both runs, and
   no order may be refunded more than was paid.
 - Mutant tests break one mechanism each (four label rules, the pc component, rule uniqueness,
-  the rule's origin set, once-per-ticket, never-refunded, record-before-call, the existence
-  taint, the goodwill rule's origins, amount and per-customer bound, extraction under control,
-  and the execution re-check's direction) and require the harness to fail. The execution
+  the rule's origin set, once-per-ticket, never-refunded, record-before-call, the halt on a
+  missing trusted ticket (D-054), the goodwill rule's origins, amount and per-customer bound, extraction under control,
+  and the execution re-check's direction) and require the harness to fail. Every mutant runs
+  against the shapes properties, and the grammar properties run the mutants the grammar catches
+  on its own. A mutant counts as caught only from a clean state: an explicit seed, no example
+  database, and Hypothesis's generation pinned to the seed (`tests/determinism.py`, D-056). The
+  execution
   pre-pass has no mutant: the harness has no concurrent writer, so it is covered by regression
   tests only.
-- `tasks.py check` runs a derandomized profile; `tasks.py fuzz` runs the `fuzz` profile. Shrunk
+- `tasks.py check` runs a derandomized profile; `tasks.py fuzz` runs the `fuzz` profile. Neither
+  uses an example database. Shrunk
   counterexamples become `@example` regression tests.
 
 ---

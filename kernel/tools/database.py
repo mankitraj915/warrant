@@ -28,9 +28,18 @@ CREDIT_MAX = 50_000  # paise; the largest account credit any action may issue
 GOODWILL_AMOUNT = 10_000  # paise; the standard goodwill credit (ticket_goodwill_credit)
 OPERATOR_ONLY = Label(sinks=frozenset({"operator"}))
 EXISTS = "@row"  # pseudo-column: the existence of a customer-creatable row
-# Extension point for the T08 hypothesis test (D-036); always True in use. False
-# drops the existence origin from point reads of a trusted ticket id.
-POINT_READ_EXISTENCE = True
+# Point reads of a trusted ticket id (D-028, D-036, D-054). Adopted in Phase 3:
+# such a read that finds no row halts the run during resolution, so the row's
+# existence can only suppress a whole run, and such reads carry no existence
+# origin. Ids from untrusted data keep it. Both are extension points for the
+# tests: the taint alone (True, False) was the Phase 1-2 rule; the narrowing
+# without the halt (False, False) is unsound and is a mutant.
+POINT_READ_EXISTENCE = False
+HALT_ON_ABSENT_TRUSTED_TICKET = True
+
+
+class ResolutionHalted(Exception):
+    """Resolution stopped before any action was decided; nothing executes."""
 
 
 def lossless_text(raw: bytes) -> str:
@@ -137,6 +146,8 @@ class Database:
             "SELECT id, customer_id, subject, body, status FROM tickets WHERE id = ?",
             (ticket_id.value,),
         ).fetchone()
+        if row is None and ticket_id.label.trusted and HALT_ON_ABSENT_TRUSTED_TICKET:
+            raise ResolutionHalted(f"ticket {ticket_id.value} does not exist")
         exists = Label.untrusted_cell("tickets", int(ticket_id.value), EXISTS)
         narrowed = not POINT_READ_EXISTENCE and ticket_id.label.trusted
         structure = ticket_id.label if narrowed else join(ticket_id.label, exists)

@@ -19,11 +19,12 @@ from kernel.tools.database import GOODWILL_AMOUNT
 from planners import builders
 from planners.builders import Json, call, expr, lit, map_, plan, ref, refund_from_ticket_text
 from planners.fuzz import CASE_TICKET, OTHER_CUSTOMER, _case_world, raw_extractor
+from planners.oracle import credit_if_order_mentioned
 
 GOODWILL = "ticket_goodwill_credit"
 
 
-def _world(body: str = "My parcel was late.") -> World:
+def _world(body: str = "My parcel #7000 was late.") -> World:
     return _case_world(1, "in_transit").replace_text("tickets", CASE_TICKET, "body", body)
 
 
@@ -33,7 +34,10 @@ def _run(p: Json, world: World | None = None, env: Environment | None = None) ->
 
 
 def credit_ticket_customer(amount: int = GOODWILL_AMOUNT, reason: str = "goodwill") -> Json:
-    return builders.credit_ticket_customer(CASE_TICKET, amount, reason)
+    """A credit to the ticket's customer that the ticket text triggers (it names one of
+    the customer's orders). Since D-054 a credit to an operator-named ticket's customer
+    with no text involved is trusted and never consults the rule."""
+    return credit_if_order_mentioned(CASE_TICKET, amount, reason)
 
 
 def _credits(env_or_result: Environment) -> list[tuple[int, int, int]]:
@@ -48,6 +52,17 @@ def test_admits_the_standard_credit_to_the_tickets_customer() -> None:
     r = _run(credit_ticket_customer(), env=env)
     assert r.outcome == "executed" and [v.rule for v in r.verdicts] == [GOODWILL]
     assert _credits(env) == [(CASE_TICKET, 100, GOODWILL_AMOUNT)]
+
+
+def test_a_credit_with_no_text_involved_is_trusted_and_skips_the_rule() -> None:
+    """D-054: a credit to an operator-named ticket's customer, read from that ticket, uses
+    only trusted cells, so it is allowed without the rule. Before D-054 the read's existence
+    origin tainted it and sent it to the rule."""
+    env = Environment(materialize(_world("My parcel was late.")), PaymentMock(), raw_extractor)
+    r = _run(builders.credit_ticket_customer(CASE_TICKET, GOODWILL_AMOUNT - 1), env=env)
+    assert r.outcome == "executed" and r.rule_log == ()
+    assert [v.kind for v in r.verdicts] == ["ALLOW"] and [v.rule for v in r.verdicts] == [None]
+    assert _credits(env) == [(CASE_TICKET, 100, GOODWILL_AMOUNT - 1)]
 
 
 # --- rejects -------------------------------------------------------------------------
