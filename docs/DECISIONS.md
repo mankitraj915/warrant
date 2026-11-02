@@ -3221,3 +3221,68 @@ harness notices (`tests/test_ni_mutants.py`, `tests/deterministic_mutants.py`). 
 would remove the mutant evidence in RESULTS. Each is commented where it is defined.
 
 **Result.** Nothing removed. The kernel code is unchanged by this pass.
+
+## v1 skeptical review: responses (2026-11-02; issue #46)
+
+**The reviewer.** A fresh reviewer asked to read the repository as a skeptical hiring panel would:
+overclaiming, padding, inconsistent numbers, broken reproduction steps, and any claim about how
+the project was built. It read the README draft, RESULTS (with the final numbers still
+pending), the ADRs and the other docs, spot-checked the code, and compared the numbers with
+stage d's artifact at 13cd4d8. It could run `eval`, `demo`, `trace` and the link check, nothing
+heavy. Its report is verbatim in `docs/reviews/V1_REVIEW.md`. Its line numbers refer to the
+files as they were then.
+
+| # | finding | response | where |
+|---|---|---|---|
+| 1 | High: the isolated Warrant rows sit beside the undefended ones, but the gullible planner under isolation writes the oracle plan by construction | **Fixed.** The rows are labelled "planner isolated". README and RESULTS say these rows measure isolation, and that the leaked-context rows are the kernel against attack plans. | README, RESULTS |
+| 2 | High: WHAT_WENT_WRONG and ADR 0010 imply the generator fix closed the held-out gaps; two are still missed after it | **Fixed.** WHAT_WENT_WRONG, ADR 0010 and the README state the post-fix result from the final run. The shared-root-cause claim is withdrawn for the two still missed. | README, WHAT_WENT_WRONG, ADR 0010, RESULTS |
+| 3 | High: tool and authorship references | **Fixed in the public docs:** RESULTS "written by hand" became "compiled from the run artifacts", "every miss I checked" became "every miss checked", "hand-written plan/shapes" became "fixed" (also in DESIGN), and the descriptions of who wrote the holdout injections and attack plans became "an author who never saw the policies". **Not changed:** DECISIONS, `docs/reviews/`, SPEC's process text and `CLAUDE.md`. They are the working record of how the project was run, and editing them would rewrite the record. Whether they stay in a public repository is the owner's decision before publishing (hand-off). | RESULTS, WHAT_WENT_WRONG |
+| 4 | Medium: "injected text can stop a whole run, but never change what executes" contradicts the rules' declared releases | **Fixed:** "outside the rules' declared releases". | README, ADR 0003 |
+| 5 | Medium: the README mutant paragraph overstates (NI cannot reach every mutant; under-delivering designs omitted; "every number comes from the commands above") | **Fixed.** The paragraph distinguishes the 20 NI-harness mutants from the four deterministic ones, reports the low per-seed shares, and names the command the mutant results come from. | README |
+| 6 | Medium: "never tuned against" the holdout, which has been re-run after every change | **Fixed.** The holdout is described as written separately and since re-run with known results, so it checks generalisation and is not a fresh held-out result. | README, RESULTS, ADR 0010, PROCESS |
+| 7 | Medium: the held-out mutant writer was not blind to the mutant list | **Fixed** with the D-057 wording. | ADR 0010, PROCESS |
+| 8 | Medium: PROCESS understates what the Gate 3 reviewer received | **Fixed.** | PROCESS |
+| 9 | Medium: "108,462 examples" counts generated cases, including invalid ones | **Fixed:** "102,000 examples (108,462 generated cases)". The Gate 3 baseline table above keeps its column, which counts generated cases; its header is read that way from here on. | RESULTS, ADR 0010, WHAT_WENT_WRONG |
+| 10 | Medium: SPEC still describes Phase 4 and `report` | **Fixed:** a v1-scope note at the top of SPEC, and README says v1.1. **Deferred to v1.1:** the `evals/harness.py` docstring, so that v1's code stays byte-identical to the measured commit. | SPEC, README |
+| 11 | Low: "Offline" before the first `uv sync`; no run time for `check` | **Fixed.** | README |
+| 12 | Low: pair counts without "applicable" | **Fixed.** | README |
+| 13 | Low: "almost every pair needs approval" is false for holdout leaked+gullible | **Fixed:** limited to the attacker-plan model. | RESULTS |
+| 14 | Low: the cap sweep omits steering | **Fixed:** a steering column, from the final run's sweep. | RESULTS |
+| 15 | Low: stale comments (`kernel/declassify.py`, `kernel/execution.py`); `make demo` missing | **Makefile fixed.** **Kernel comments deferred to v1.1**, for the same reason as #10. | Makefile |
+| 16 | Low: padding and repetition; no LICENSE; version 0.0.0 | **Version set to 1.0.0** (`pyproject.toml`, `uv.lock`). **Not changed:** the CaMeL and AgentDojo credit appears in README and RESULTS on purpose, because each is an entry point and must credit them. The repeated holdout and leaked-context caveats stay, because each document is meant to be read alone. **LICENSE** is the owner's choice before publishing. | pyproject.toml, uv.lock |
+
+## v1 fix re-review: responses (2026-11-02; issue #46)
+
+A second fresh reviewer checked the fixes above against the files and against stage d's
+artifact at 9f2f0c3. It confirmed that every README number matches the run, and that no code
+under `kernel/`, `planners/`, `evals/`, `scripts/`, `tests/` or `domain/` changed since
+9f2f0c3. Its report is verbatim in `docs/reviews/V1_FIX_REVIEW.md`.
+
+| # | finding | response |
+|---|---|---|
+| 1 | Medium-High: leaked context does not mean "labels alone stop every attack". With the attacker-plan model, 255/414 dev and 290/488 holdout pairs were blocked outright; the rest went to the idealised approver. Steering also counts requests that became blocks. | **Fixed** in README, RESULTS and WHAT_WENT_WRONG. They give the blocked/approval split (counted from the eval JSON in this session), attribute the routed pairs to the simulated approver, and define steering as the harness computes it (`evals/harness.py`). The finding-13 response above was wrong; this replaces it. |
+| 2 | Medium: "cannot change what executes" ignores the approval path | **Fixed:** "cannot change which unapproved effects execute", and README says approval steering is measured, not prevented. |
+| 3 | Medium: the docs README links (reviews, DECISIONS, SPEC) still name the tooling, and this change adds more | **Not changed**, for the reason in the finding-3 response above. It is listed in the hand-off as a decision the owner must take before the repository is made public. |
+| 4 | Low: "20 mutants" counts mutant-generator designs | **Fixed:** 16 mutants, 20 designs. |
+| 5 | Low: "(about 6%)" reads as a share | **Fixed:** 2 of 4 seeds; estimated miss near 6%. |
+| 6 | Low: the Gate 3 held-out baseline comes from stage c, not stage d | **Fixed.** |
+| 7 | Low: "No reviewer saw the evaluation results" is false for the v1 reviewers | **Fixed:** "No gate reviewer". |
+| 8 | Low: RESULTS rows not labelled "planner isolated" | **Fixed:** the four rows are labelled. |
+| 9 | Low: `make phase3-run` cannot run without `--out` | **Fixed:** target removed; `phase3-run` needs `--out`, so it is run through `tasks.py` only. |
+
+## v1 release (2026-11-02; issue #46)
+
+**Fresh-clone reproduction following only the README** (this session, on the 8 GB Windows
+laptop): a new clone of 341ad19, whose code and README are v1.0's, then the README's three
+commands plus the demo it names.
+- `uv sync --locked`: exit 0.
+- `tasks.py check`: exit 0, "284 passed in 136.31s".
+- `tasks.py eval` and `eval --suite holdout`: exit 0; every table identical to stage d's logs at
+  9f2f0c3 (run 41386725959), apart from output paths; PII canary 0 hits in both.
+- `tasks.py demo`: exit 0, identical to `docs/demo_transcript.txt` apart from the echoed command
+  line and line endings.
+
+**Tags.** `gate-3` is on 9f2f0c3, the measured commit. `v1.0` is on the merge commit of PR #48.
+Between them only documentation, the Makefile and the package version change; `kernel/`,
+`planners/`, `evals/`, `scripts/`, `tests/` and `domain/` are identical
+(`git diff --stat gate-3 v1.0 -- kernel planners evals scripts tests domain` is empty).

@@ -12,7 +12,7 @@ real bugs in that same code:
 - two ways extraction under untrusted control could launder labels;
 - trusted actions on a second ticket of the case customer.
 
-The fuzzer could not have found any of them, because its hand-written plan shapes never
+The fuzzer could not have found any of them, because its fixed plan shapes never
 produced those plans. A passing fuzz run is evidence about the shapes it samples and nothing
 more. That led to new shapes, a grammar-based plan generator, and mutant tests that require
 the harness to fail on a deliberately broken kernel.
@@ -91,7 +91,7 @@ DESIGN §10 and THREAT_MODEL §6.
 ## A held-out mutant no generator could reach
 
 At Gate 3, a reviewer who saw only the design and the kernel wrote five new mutants. The fuzzer
-missed three of them at every design, 108,462 examples each. One of these was approval
+missed three of them at every design, 102,000 examples each. One of these was approval
 consumption that ignores the approved hash:
 - The approval-binding property's approver always answered with the right hash for the right
   run.
@@ -99,10 +99,12 @@ consumption that ignores the approved hash:
   to the property, however long it ran.
 - Unit tests covered replay and cross-run use, but the property could not.
 
-The other two misses had the same root: untrusted text was always random, never a valid reason
-code or an existing id. The generators now draw domain-valid untrusted values, and the approver
-sometimes answers with a stale hash or another run's id. The three misses stay in RESULTS as
-permanent entries; their post-fix results are reported separately.
+The fix changed the generators: untrusted text can now be a valid reason code or an existing
+id, the grammar can build a trusted list of untrusted elements, and the approver sometimes
+answers with a stale hash or another run's id. Afterwards the approval mutant was caught at
+the first seed. The other two were still missed in 102,000 examples, so the cause given for them
+was not sufficient. No deterministic test covers either mechanism. They are open, and the three
+Gate 3 misses stay in RESULTS as permanent entries.
 ([D-057](DECISIONS.md#d-057-held-out-mutants-at-gate-3-owner-2026-10-31),
 [Gate 3 baseline](DECISIONS.md#gate-3-baseline-stage-c-results-commit-7da1652-verified-2026-11-02),
 [D-070](DECISIONS.md#d-070-generator-coverage-domain-valid-untrusted-values-2026-11-02-issue-13-step-13))
@@ -134,13 +136,15 @@ suites, under both attacker models. That says less than it seems to:
 - **Gullible planner.** It obeys few holdout phrasings, so its holdout zero would have been
   low anyway.
 - **What actually stops the attacks.** Under leaked context the plan label taints every
-  literal, so almost every action needs approval. The simulated approver approves only the
-  intended set.
-- **The cost.** 93.6% of holdout pairs were steered to approval with the attacker-plan model,
-  and utility under attack fell to 8.8%. With a real human approver, the result would depend
-  on that human.
+  literal. With the attacker-plan model the kernel blocked 290 of 488 holdout pairs outright and
+  sent the other 198 for approval, where the simulated approver, which approves only the
+  intended set, refused every one.
+- **The cost.** 93.6% of holdout pairs were steered (their approval request differs from the
+  benign run's), and utility under attack fell to 8.8%. With a real human approver, the 198
+  would depend on that human.
 
-The zero shows that labels route everything to a person when isolation fails. It does not
+The zero shows that labels block or route to a person everything an attack plan does when
+isolation fails. It does not
 show that labels alone are a practical defence.
 ([F-3](DECISIONS.md#f-3-finding-the-gullible-planners-triggers-are-fitted-to-the-dev-phrasing-owner-gate-2),
 [RESULTS](RESULTS.md#the-three-defences-side-by-side))

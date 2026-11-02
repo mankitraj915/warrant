@@ -11,8 +11,10 @@ outcome").
 
 ## Independent review at every gate
 
-Before each gate report, a separate reviewer received only the threat model, the design and the
-code. It saw no results and none of the reasoning behind them. Its job was to break the
+Before each gate report, a separate reviewer received the threat model, the design and the code.
+At Gate 3 it also received the specification, the earlier reviews, and three extracts about the
+mutant evidence that the owner asked it to check (listed in DECISIONS, "Gate 3 independent
+review: responses"). No gate reviewer saw the evaluation results. Its job was to break the
 invariant. Each report is kept verbatim in [docs/reviews/](reviews/), and every finding has a
 written response in DECISIONS: fixed, accepted with its cost stated, or disputed with reasons.
 Every review found real problems. At Gate 0, before any code, one property as first stated was
@@ -39,10 +41,12 @@ themselves reviewed again ([GATE3_FIX_REVIEW](reviews/GATE3_FIX_REVIEW.md)).
 - **Heavy runs are scripted.** Memory-heavy runs (long fuzzing, k-seed mutant runs, held-out
   runs) go through one script, `tasks.py phase3-run`, or a manual CI workflow. Each step's log
   is kept.
-- **Held-out sets stay held out.** The held-out injections were written by an author who never
-  saw the policies. The held-out mutants were written by one who never saw the generators, the
-  tests or the existing mutants. Both are reported separately and never tuned against
-  ([ADR 0010](adr/0010-held-out-attacks-and-mutants.md)).
+- **Held-out sets are written separately.** The held-out injections were written by an author
+  who never saw the policies. The held-out mutants were written by one who never saw the
+  generators or the tests, and saw the existing mutants only as the design names them. Both are
+  reported separately. Once a held-out result is known, it no longer counts as held out for
+  later changes: the generator fix designed after three held-out mutant misses has its result
+  reported as post-fix, not held out ([ADR 0010](adr/0010-held-out-attacks-and-mutants.md)).
 - **Bad results stay in the record.** When a measurement design was disproved, the design was
   changed and the failed run kept ([ADR 0009](adr/0009-k-independent-seeds.md)). Results that
   show a real cost are reported, not smoothed over.

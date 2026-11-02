@@ -95,7 +95,7 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 
 ## Current status
 
-Phase: **3, closing Gate 3** (Gate 2 approved 2026-10-30). Everything is on `main` (repo
+Phase: **v1.0 shipped** (Gate 3 passed 2026-11-02, tag `gate-3` at 9f2f0c3; v1.0 on PR #48's merge commit). Everything is on `main` (repo
 github.com/mankitraj915/warrant, private). Work goes through one issue, branch and PR per
 change, merged with merge commits; CI runs `check` and the new-tests-fail-on-base job (D-060,
 D-063, D-066). History through stage c: DECISIONS D-056 to D-059 and "Gate 3 baseline" (every
@@ -133,13 +133,17 @@ GitHub Actions, never in session. Plan and progress (tick as done):
    tag gate-3 at 9f2f0c3.
 5. [x] Step 4: v1 ships without a local LLM planner (D-074; RESULTS says so); the optional
    CI-only small-model job is skipped (owner, 2026-11-02). RESULTS stays hand-written (D-075).
-6. [ ] Step 5: [ ] README (drafted, uncommitted until stage d's numbers; `tests/test_doc_links.py`
-   checks its links), [x] docs/WHAT_WENT_WRONG.md, [x] docs/adr/ (10), [x] docs/PROCESS.md,
-   [x] docs/STUDY_GUIDE.md, [x] code trimming pass (no unreferenced names, markers or
-   commented-out code in `kernel/`; the mutant extension flags stay; record in DECISIONS with
-   stage d), [x] `tasks.py demo` plus a committed transcript.
-7. [ ] Step 6: final skeptical review, fixes, fresh-clone reproduction, tag v1.0 and release,
-   hand-off report.
+6. [x] Step 5: README (numbers from the 9f2f0c3 stage d run; `tests/test_doc_links.py` checks
+   its links), WHAT_WENT_WRONG, docs/adr/ (10), PROCESS, STUDY_GUIDE, code trimming pass
+   (DECISIONS, nothing removed), `tasks.py demo` plus a committed transcript.
+7. [x] Step 6: skeptical review (`docs/reviews/V1_REVIEW.md`) and fix re-review
+   (`V1_FIX_REVIEW.md`), responses in DECISIONS; fixes (PR #48); fresh-clone reproduction
+   following only the README (local, 341ad19: check, both evals, demo; DECISIONS "v1 release");
+   v1.0 tagged on PR #48's merge commit, with a GitHub release; hand-off report given. Repo
+   stays private. Before publishing, the owner decides on a LICENSE and on whether the working
+   records (CLAUDE.md, DECISIONS, docs/reviews/, SPEC's process text), which name the tooling,
+   stay in a public repo. Open: #10, #11 (v1.1), a fuzz run at the tagged commit, the
+   language-model planner and `tasks.py report` (v1.1), stale comments deferred by the v1 review.
 
 Never run the fuzz or the owner-run stages inside a session. `check` takes about 2 min
 (witness replays under the issue #13 generators, D-070).
