@@ -37,12 +37,17 @@ at what cost in memory and time. That is planned for v1.1.
   - dev: 40 user tasks × 11 injection tasks, 414 applicable pairs;
   - holdout: the same 40 user tasks × 15 injection tasks written by an independent red-team agent
     (D-043), 488 applicable pairs. The holdout was never used to tune anything.
-- **Commands** (commit 6e27f60, run by the owner outside a Claude Code session; DECISIONS
-  "Phase 3 owner run"):
+- **Commands** (commit 9f2f0c3, the `gate-3` tag): `phase3-run --stage d` on the
+  `owner-stages` GitHub Actions workflow, run 41386725959 (DECISIONS "Stage d at the final Gate 3
+  commit"), which runs:
   - `uv run --locked python scripts/tasks.py eval` and `eval --suite holdout`;
-  - `sweep` and `sweep --suite holdout`.
+  - `sweep` and `sweep --suite holdout`;
+  - the mutant measurements in the non-interference section.
 
-  The PII canary scan found 0 hits in both suites.
+  The runner was Ubuntu 24.04 with 2 CPUs and 8 GB of memory, and Python 3.12.3. `check` and
+  both evaluations also ran from a fresh clone of 9f2f0c3 on the 8 GB Windows laptop the project
+  targets, with the same tables. Every evaluation and sweep figure below was the same at 6e27f60
+  (stage a), at 13cd4d8 and at 9f2f0c3. The PII canary scan found 0 hits in both suites.
 - **Defences** (SPEC §6):
   - **Warrant:** the full kernel. The planner sees only the operator request and tool
     signatures.
@@ -183,6 +188,12 @@ matter:
 | Phase 3, mixed generator (6e27f60) | the same three | 20,000 each | 0 (stage a) |
 | Phase 3, split generators (c4b52a6) | the three grammar-plan properties | 10,000 each | 0 (stage b) |
 | Phase 3, split generators (c4b52a6) | all six properties, statistics runs | 2,000 each | 0 (stage b) |
+| Gate 3 final (9f2f0c3) | all six properties, in `check` (derandomized) | 200 each | 0 (stage d) |
+
+**The large fuzz runs predate the Gate 3 fixes.** The 10,000- and 20,000-example runs were at
+6e27f60 and c4b52a6. The Gate 3 fixes then changed the kernel (D-061 to D-072) and the generators
+(D-070). At the tagged commit the six properties ran only inside `check`, at 200 examples each. A
+fuzz run at the tagged commit is a one-command CI run that v1 does not include.
 
 **How much each pass actually checks** (stage b statistics; DECISIONS "stage b results"):
 - **Single-run NI:** 73% of shape pairs and 74% of grammar pairs had no halted run, so NI-1
@@ -245,7 +256,7 @@ The per-mutant table is in DECISIONS D-058.
   review: responses").
 - **What `check` runs:** each mutant's earliest recorded detection, replayed exactly. That is a
   regression check, not the detection claim. The k-seed designs run in an owner-run script
-  (`phase3-run --stage c`).
+  (`phase3-run --stage c` and `--stage d`).
 
 ### Gate 3 baseline (commit 7da1652, owner-run stage c)
 
@@ -291,6 +302,49 @@ plus 3 stage-b seeds at 4,000):
 The grammar generator was never expected to reach the declassification rules, multi-run state or
 approvals (D-053). It is a second, independent source of plans for the labelling rules; the
 hand-written shapes cover the rest.
+
+### After the Gate 3 fixes (commit 9f2f0c3, stage d)
+
+The Gate 3 fixes and the generator change (D-070) came after the baseline. Stage d measures
+again at fresh seeds (202619001 onwards, never used to choose a design), on the commit that is
+tagged. DECISIONS "Stage d at the final Gate 3 commit" has the per-mutant table.
+
+**k-seed designs at fresh seeds:** all 20 required mutants were caught by at least one of their
+k seeds (`mutant_kseed.jsonl`, 170 rows).
+- Two observed per-seed shares were below the design's lower bound: "extraction ignores
+  control" and "execution writes no record before the provider call", each caught at 2 of 4
+  seeds against an estimated 0.69. At that share, k = 4 gives an estimated miss probability of
+  about 6%, not 1%.
+- The two that were low at the Gate 3 baseline were caught at 4 of 4 seeds here. Which mutants
+  come in low changes with the seeds. So the 1% per mutant is a design target that the
+  8-seed estimates do not reliably deliver, not a measured bound.
+
+**Post-fix result for the three missed held-out mutants.** The generators were changed knowing
+what these mutants do (D-070), so these are no longer held-out results; they show whether the
+generator fix closed each gap. Same designs as the baseline, stopping at the first catching
+seed:
+
+| mutant | Gate 3 baseline (7da1652) | after the fix (9f2f0c3) |
+|---|---|---|
+| the goodwill rule no longer requires a trusted credit reason | missed | **still missed** in 102,000 examples (107,571 generated cases) |
+| `contains` ignores the labels of the list's elements | missed | **still missed** in 102,000 examples (107,571 generated cases) |
+| approval consumption ignores the approved hash | missed | **caught** by NI-5 (shapes), first seed, generated case 164 |
+
+The two held-out mutants caught at the baseline were caught again (`mutant_postfix.jsonl`, 208
+rows). The baseline's "108,462 examples" counted generated cases, including those Hypothesis
+discards as invalid; the designs ran 102,000 valid examples.
+
+**Reading.**
+- **Approval hash: closed.** The approval-binding property's approver now sometimes answers
+  with a stale hash or another run's id (D-070), and the property caught the mutant at its first
+  seed. The single-run properties, which involve no approval, cannot see it.
+- **Goodwill reason and `contains` element labels: still open.** The generators can now put a
+  valid reason code or an existing id into untrusted text, and the grammar can build a trusted
+  list of untrusted elements. Neither mutant was caught in 102,000 examples. So the causes
+  given at the baseline were not sufficient, and these two mechanisms have no property-based
+  evidence. No deterministic test covers either one either: the goodwill tests use only
+  trusted reasons, and the one `contains` test does not build a trusted list of untrusted
+  elements. Both stay open (issues #10 and #11) as test gaps, not as known kernel bugs.
 
 ## Findings carried into this phase
 

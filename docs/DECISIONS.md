@@ -3090,3 +3090,134 @@ hand-written page that cites its sources can be checked against those sources di
 
 **Cost.** A transcription error is possible. The v1 skeptical review checks RESULTS against
 the artifacts. The generator is planned for v1.1.
+
+## Stage d at 13cd4d8: a record, superseded as the headline (GitHub Actions run 41370326167, verified 2026-11-02; issue #26)
+
+`phase3-run --stage d` on the `owner-stages` workflow, at main 13cd4d8: after Gate 3 findings 1-9
+and generator coverage (#13), before the re-review fixes (#36-#38). Runner: Ubuntu 24.04 image
+20261026.354.1, 2 CPUs (AMD EPYC 7763), 8,122,980 kB memory, Python 3.12.3 (`runner.json`).
+Seven steps, all exit 0, every row at 13cd4d8, clean tree after each step; 4,249 s in all.
+
+| step | exit | time | result |
+|---|---|---|---|
+| `check` | 0 | 120 s | 274 passed in 116.77 s |
+| `mutant-kseed` | 0 | 564 s | 170 rows; every required mutant caught by at least one of its k seeds |
+| `mutant-postfix-heldout` | 0 | 3,501 s | 208 rows; 3 of 5 caught, 2 missed at every design |
+| `eval` dev, holdout | 0 | 7 s, 8 s | canary leaks 0 in both |
+| `sweep` dev, holdout | 0 | 22 s, 27 s | 7 caps × 4 configurations |
+
+**Why it is not the headline.** The re-review fixes changed `kernel/runlock.py`, `kernel/run.py`
+and `kernel/execution.py` after 13cd4d8. The owner decided that every headline number must come
+from the commit that is tagged, so stage d ran again at the final Gate 3 commit (below). This
+run stays on record.
+
+**Results.** Every row of `mutant_kseed.jsonl` and `mutant_postfix.jsonl` (mutant, seed, caught,
+detection index, generated cases) and every evaluation and sweep figure is identical to the run
+at the final commit below, which has the tables. Every evaluation and sweep figure also equals
+stage a's at 6e27f60, as in RESULTS.
+
+## Stage d at the final Gate 3 commit (9f2f0c3, GitHub Actions run 41386725959, verified 2026-11-02; issue #26)
+
+`phase3-run --stage d` on the `owner-stages` workflow at main 9f2f0c3, after the re-review fixes
+(#36-#38). This is the commit tagged `gate-3`, and RESULTS and the README take their numbers from
+this run only (owner decision). Runner: Ubuntu 24.04 image 20261026.354.1, 2 CPUs (AMD EPYC
+9V74), 8,122,976 kB memory, Python 3.12.3. Seven steps, all exit 0, every row at 9f2f0c3, clean
+tree after each step; 3,116 s in all.
+
+| step | exit | time | result |
+|---|---|---|---|
+| `check` | 0 | 89 s | 284 passed in 86.13 s |
+| `mutant-kseed` | 0 | 409 s | 170 rows; every required mutant caught by at least one of its k seeds |
+| `mutant-postfix-heldout` | 0 | 2,571 s | 208 rows; 3 of 5 caught, 2 missed at every design |
+| `eval` dev, holdout | 0 | 5 s, 6 s | canary leaks 0 in both |
+| `sweep` dev, holdout | 0 | 17 s, 20 s | 7 caps × 4 configurations |
+
+**Same as at 13cd4d8.** The kernel changes in #36-#38 (run lock, failed-run audit) did not change
+any measured outcome: every mutant row matches 13cd4d8's row for row, detection indices
+included, and the evaluation and sweep JSON are equal apart from their metadata (compared with a
+script in this session).
+
+**k-seed designs at seeds 202619001 onwards** (D-058; seeds caught / seeds run, against the
+design's `q_low`; bold where the observed share is below it):
+
+| property | source | mutant | n × k | seeds caught | design q_low | caught |
+|---|---|---|---|---|---|---|
+| NI | shapes | at ignores index label | 250 × 10 | 8/10 (80%) | 0.400 | yes |
+| NI | shapes | extraction ignores control | 2,000 × 4 | **2/4 (50%)** | 0.688 | yes |
+| NI | shapes | extractor output labelled trusted | 250 × 4 | 4/4 | 0.688 | yes |
+| NI | shapes | filter ignores predicate labels | 500 × 4 | 3/4 (75%) | 0.688 | yes |
+| NI | shapes | goodwill rule ignores amount | 250 × 22 | 10/22 (45%) | 0.193 | yes |
+| NI | shapes | goodwill rule ignores origin set | 1,000 × 4 | 4/4 | 0.688 | yes |
+| NI | shapes | map body pc ignores list structure | 500 × 4 | 4/4 | 0.688 | yes |
+| NI | shapes | ownership rule drops uniqueness | 250 × 4 | 4/4 | 0.688 | yes |
+| NI | shapes | ownership rule ignores origin set | 500 × 4 | 3/4 (75%) | 0.688 | yes |
+| NI | shapes | point read of a missing trusted ticket does not halt | 250 × 4 | 4/4 | 0.688 | yes |
+| NI | shapes | policy ignores pc | 250 × 4 | 3/4 (75%) | 0.688 | yes |
+| NI | grammar | extractor output labelled trusted | 250 × 14 | 5/14 (36%) | 0.289 | yes |
+| NI | grammar | map body pc ignores list structure | 250 × 22 | 6/22 (27%) | 0.193 | yes |
+| NI | grammar | point read of a missing trusted ticket does not halt | 500 × 4 | 4/4 | 0.688 | yes |
+| NI | grammar | policy ignores pc | 1,000 × 4 | 4/4 | 0.688 | yes |
+| multirun | shapes | execution writes no record before the provider call | 1,000 × 4 | **2/4 (50%)** | 0.688 | yes |
+| multirun | shapes | goodwill rule drops the per-customer bound | 250 × 4 | 3/4 (75%) | 0.688 | yes |
+| multirun | shapes | ownership rule drops never-refunded order | 250 × 14 | 9/14 (64%) | 0.289 | yes |
+| multirun | shapes | ownership rule drops once-per-ticket across runs | 250 × 22 | 6/22 (27%) | 0.193 | yes |
+| NI-5 | shapes | re-check treats a relaxed verdict as stricter | 1,000 × 14 | 6/14 (43%) | 0.289 | yes |
+
+- All 20 required mutants were caught.
+- Two observed shares were below `q_low`: "extraction ignores control" and "execution writes no
+  record before the provider call", each 2 of 4 against 0.688, so about 6% estimated miss
+  rather than 1%. The two low at stage c ("goodwill rule ignores origin set", "ownership rule
+  drops uniqueness") were 4 of 4 here. Which mutants come in low changes with the seeds, as
+  expected when `q` is estimated from 8 seeds (D-058). No tuning follows.
+
+**Post-fix held-out mutants** (D-070; no longer held out), at `HELDOUT_DESIGN`, stopping at the
+first catching seed. The last column counts generated cases, including those Hypothesis
+discards as invalid. The designs themselves are 102,000 valid examples (22 × 1,000 + 22 × 2,000
++ 22 × 1,000 + 14 × 1,000):
+
+| held-out mutant | post-fix result | generated cases |
+|---|---|---|
+| ownership amount at most refundable | caught: NI grammar, seed 202619002, example 723 | 1,777 |
+| goodwill reason not required trusted | **missed at every design** | 107,571 |
+| contains ignores element labels | **missed at every design** | 107,571 |
+| order note labelled trusted | caught: NI grammar, seed 202619001, example 59 | 59 |
+| approval hash not compared | caught: NI-5 shapes, seed 202619001, example 164 | 68,411 |
+
+**Correction to the Gate 3 baseline above.** Its "examples run" column and the "108,462
+examples" in issues #10-#12 count generated cases in the same way; the designs ran 102,000
+valid examples (v1 skeptical review, finding 9).
+
+**Issues.** #12 (approval hash) is closed with this evidence. #10 (goodwill reason) and #11
+(`contains` element labels) stay open: the D-070 generators did not reach either mechanism, and
+no deterministic test covers either one (the goodwill tests use only trusted reasons; the one
+`contains` test does not build a trusted list of untrusted elements). They are listed under
+the README's Limitations.
+
+**Local reproduction** (this session, a fresh clone of 9f2f0c3 on the 8 GB Windows laptop, about
+640 MB free): `uv sync --locked`; `tasks.py check` exit 0, "284 passed in 132.37s"; `tasks.py eval`
+and `eval --suite holdout` exit 0, output identical to this run's logs apart from file paths and
+the commit id; `tasks.py demo` identical to `docs/demo_transcript.txt` apart from the command
+line that `tasks.py` echoes and Windows line endings.
+
+**Not run at this commit:** the large fuzz runs (last at 6e27f60 and c4b52a6). At 9f2f0c3 the six
+NI properties ran only in `check`, 200 examples each. Stated in RESULTS.
+
+## Code trimming pass before v1 (2026-11-02; step 5)
+
+**Question.** Does `kernel/` carry anything a reviewer would have to read past: unused names,
+commented-out code, leftover markers?
+
+**Checked** (this session):
+- `uv run --locked ruff check --select ERA,F401,F841,F811,ARG kernel/`: no commented-out code
+  (ERA), no unused imports or variables, no redefinitions. Two `ARG002` reports, both on
+  `DenyAll.review(self, request, hash_)` in `kernel/approval.py`. It implements the `Approver`
+  protocol, so it keeps the protocol's parameters.
+- `grep -rnE "TODO|FIXME|XXX|HACK" kernel/`: 0 lines.
+
+**Kept on purpose: the mutant extension points.** `kernel/declassify.py`, `kernel/execution.py`,
+`kernel/interpreter.py` and `kernel/policy.py` each have a module-level flag or function that is
+always on in use, so that the mutant tests can switch one mechanism off and check that the
+harness notices (`tests/test_ni_mutants.py`, `tests/deterministic_mutants.py`). Removing them
+would remove the mutant evidence in RESULTS. Each is commented where it is defined.
+
+**Result.** Nothing removed. The kernel code is unchanged by this pass.
