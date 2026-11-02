@@ -84,7 +84,11 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
   `owner-stages.yml` (`gh workflow run owner-stages.yml -f stage=d`), which uploads results.
 - `eval-llm`: evaluation with the local model. Phase 4, not yet.
 - `report`: regenerate `docs/RESULTS.md`. Phase 5, not yet.
-- `demo`: scripted demonstration. Phase 5, not yet.
+- `demo`: scripted demonstration (`scripts/demo.py`): an outage bulk refund approved by hash
+  and executed exactly, a stale approval that executes nothing, and an injected ticket that is
+  blocked, each explained from its audit row. `tests/test_demo.py` keeps
+  `docs/demo_transcript.txt` identical to a real run (regenerate:
+  `uv run --locked python scripts/demo.py > docs/demo_transcript.txt`).
 
 ## Current status
 

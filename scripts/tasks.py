@@ -37,6 +37,7 @@ SWEEP = [[PY, "-m", "evals.sweep"]]
 TRACE = [[PY, "-m", "evals.trace"]]
 FUZZ_CHUNKS = [[PY, "scripts/fuzz_chunks.py"]]
 PHASE3_RUN = [[PY, "scripts/phase3_run.py"]]
+DEMO = [[PY, "scripts/demo.py"]]
 
 TARGETS: dict[str, list[list[str]]] = {
     "lint": LINT,
@@ -49,6 +50,7 @@ TARGETS: dict[str, list[list[str]]] = {
     "eval": EVAL,
     "sweep": SWEEP,
     "trace": TRACE,
+    "demo": DEMO,
 }
 ENV: dict[str, dict[str, str]] = {"fuzz": FUZZ_ENV}
 
