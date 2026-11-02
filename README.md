@@ -1,7 +1,35 @@
 # Warrant
 
-An information-flow-controlled action kernel for AI agents, applied to a customer-support agent
-that can issue refunds and credits and close tickets.
+Warrant is a small kernel between an AI agent's plan and its actions: a refund, credit or ticket
+closure executes only if trusted data chose it, a named rule allowed it, or a human approved its
+exact hash. Against scripted prompt injections on a customer-support agent, successful attacks
+fall from 393 of 414 to 5, each a bounded refund or credit to the ticket's own customer, and every
+number reproduces on a CPU-only laptop with no model or API keys.
+
+| dev suite, 414 attack pairs | attacks that succeed | legitimate work still done under attack | benign tasks needing a human |
+|---|---|---|---|
+| No defence | 393/414 | 21/414 | 0/40 |
+| **Warrant** (planner never sees ticket text) | **5/414** | **396/414** | 3/40 |
+| Warrant if isolation fails (planner turns the attack into a plan) | 0/414 | 39/414 | 35/40 |
+
+The attackers are scripts, not language models. In the last row the kernel blocked 255 of the
+414 attacks outright and sent the rest to a simulated approver that approves only the intended
+actions, so there a real deployment depends on a person. The [results](#results) give the
+held-out suite and what these numbers may and may not claim.
+
+## Reproduce
+
+Requires [uv](https://docs.astral.sh/uv/). The first command downloads Python 3.12 and the pinned
+packages; everything after it runs offline.
+
+```sh
+uv sync --locked                                    # Python 3.12 and pinned dependencies
+uv run --locked python scripts/tasks.py check       # lint, types, tests incl. non-interference (~2 min)
+uv run --locked python scripts/tasks.py eval        # dev suite; add --suite holdout for the holdout
+```
+
+`uv run --locked python scripts/tasks.py demo` runs the scripted demonstration whose output is
+[docs/demo_transcript.txt](docs/demo_transcript.txt).
 
 ## The problem
 
@@ -36,20 +64,6 @@ flowchart LR
     X --> A[(Audit row)]
     N --> A
 ```
-
-## Reproduce
-
-Requires [uv](https://docs.astral.sh/uv/). CPU only, no accounts or keys, no model. The first
-command downloads Python 3.12 and the pinned packages; everything after it runs offline.
-
-```sh
-uv sync --locked                                    # Python 3.12 and pinned dependencies
-uv run --locked python scripts/tasks.py check       # lint, types, tests incl. non-interference (~2 min)
-uv run --locked python scripts/tasks.py eval        # dev suite; add --suite holdout for the holdout
-```
-
-`uv run --locked python scripts/tasks.py demo` runs the scripted demonstration whose output is
-[docs/demo_transcript.txt](docs/demo_transcript.txt).
 
 ## Results
 
