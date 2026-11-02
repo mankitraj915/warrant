@@ -41,7 +41,7 @@ Without a defence, the scripted "gullible" planner was hijacked in 393 of 414 de
 but in only 39 of 488 holdout pairs. The holdout injections were not weaker:
 - The planner obeys only phrasings it was written alongside: a refund, credit or close verb
   together with an agent-addressed cue.
-- An independent agent's injections mostly use other phrasings, so the 39/488 measured the
+- The holdout's injections, written separately, mostly use other phrasings, so the 39/488 measured the
   script, not the attacks.
 
 A structured attacker-plan model, which parses no text, was added. It reaches 451/488 against
