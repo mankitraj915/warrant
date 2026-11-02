@@ -125,12 +125,16 @@ def execute(
     verdicts: Sequence[Verdict],
     db: sqlite3.Connection,
     provider: PaymentProvider,
+    done: list[Executed] | None = None,
 ) -> tuple[Outcome, list[Executed]]:
+    """Execute an authorised set. Effects are appended to ``done`` as they complete;
+    a caller that passes its own list still sees them if an exception escapes, so a
+    failed run's audit row can say what moved (Gate 3 fix re-review #2)."""
+    done = [] if done is None else done
     for action, decided in zip(actions, verdicts, strict=True):
         now, _ = decide_one(action, actions, TrustedReader(db))
         if now.kind != decided.kind:
-            return "aborted", []
-    done: list[Executed] = []
+            return "aborted", done
     for action, decided in zip(actions, verdicts, strict=True):
         if done:
             now, _ = decide_one(action, actions, TrustedReader(db))
@@ -182,6 +186,7 @@ def execute(
                 (order, ticket, amount, key, ref),
             )
             db.commit()
+            done.append(Executed(action.site, action.tool, key, ref))  # money moved
             raise RecordLost(key, ref)
         db.commit()
         done.append(Executed(action.site, action.tool, key, ref))

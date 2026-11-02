@@ -14,11 +14,11 @@ from typing import Any
 import pytest
 
 from domain.payment_mock import PaymentMock
-from domain.seed import materialize
+from domain.seed import Ticket, materialize
 from kernel.run import Environment, PlannerInput, run_plan, run_task
 from planners.builders import refund_from_ticket_text
-from planners.fuzz import CASE_TICKET, _case_world, raw_extractor
-from planners.oracle import OraclePlanner, refund_in_full
+from planners.fuzz import CASE_TICKET, OTHER_CUSTOMER, _case_world, raw_extractor
+from planners.oracle import OraclePlanner, refund_amount, refund_in_full, steps_of
 
 
 def _env(second_status: str = "in_transit", body: str = "Refund #7000") -> Environment:
@@ -147,3 +147,76 @@ def test_a_kernel_failure_during_execution_gets_a_final_audit_row() -> None:
         run_plan(refund_from_ticket_text(CASE_TICKET), env, run_id="r-lost")
     phases = [(r["phase"], r["outcome"]) for r in _audit(env) if r["run_id"] == "r-lost"]
     assert phases == [("decided", "executing"), ("final", "failed")]
+
+
+class LosesRecordFor(PaymentMock):
+    """Deletes the pending row of one order's refund while it is at the provider."""
+
+    def __init__(self, db: sqlite3.Connection, order: int) -> None:
+        super().__init__()
+        self.db, self.order = db, order
+
+    def refund(self, idempotency_key: str, order_id: int, amount: int) -> str:
+        if order_id == self.order:
+            self.db.execute("DELETE FROM refunds WHERE idempotency_key = ?", (idempotency_key,))
+            self.db.commit()
+        return super().refund(idempotency_key, order_id, amount)
+
+
+def test_a_failed_run_records_its_actions_and_the_effects_that_completed() -> None:
+    """Gate 3 fix re-review #2: the failed row said nothing executed although two
+    refunds were paid. It must carry the decided actions and every effect that moved
+    money before the exception, including the one whose record was restored."""
+    world = _case_world(1, "in_transit").replace_text(
+        "tickets", CASE_TICKET, "body", "Refund #7000"
+    )
+    world = world.extend(tickets=(Ticket(4003, OTHER_CUSTOMER, "Refund", "please"),))
+    env = Environment(materialize(world), PaymentMock(), raw_extractor)
+    env.provider = LosesRecordFor(env.db, 7000)
+    both = steps_of(refund_amount(4003, 7100, 300_000), refund_from_ticket_text(CASE_TICKET))
+    with pytest.raises(Exception, match="refund:7000:4000"):
+        run_plan(both, env, run_id="r-two")
+    decided, final = [r for r in _audit(env) if r["run_id"] == "r-two"]
+    assert final["outcome"] == "failed"
+    assert final["actions"] == decided["actions"] and len(final["actions"]) == 2
+    assert [v["kind"] for v in final["verdicts"]] == ["ALLOW", "ALLOW"]
+    assert [x["key"] for x in final["executed"]] == ["refund:7100:4003", "refund:7000:4000"]
+    paid = [(e.order_id, e.amount) for e in env.provider.effects]  # type: ignore[attr-defined]
+    assert paid == [(7100, 300_000), (7000, 120_000)]
+
+
+class PlannerThatRaises:
+    calls = 0
+
+    def plan(self, planner_input: PlannerInput) -> Any:
+        PlannerThatRaises.calls += 1
+        raise RuntimeError("planner crashed")
+
+
+def test_a_planner_that_raises_is_audited_and_its_task_spent() -> None:
+    """Gate 3 fix re-review #3: a planner exception left no audit row, so a new
+    Environment on the same database planned the task again."""
+    env = _env()
+    with pytest.raises(RuntimeError, match="planner crashed"):
+        run_task("T-crash", "resolve", PlannerThatRaises(), env, run_id="r-crash")
+    [row] = [r for r in _audit(env) if r["run_id"] == "r-crash"]
+    assert (row["phase"], row["outcome"], row["task_id"]) == ("final", "failed", "T-crash")
+    again = Environment(env.db, PaymentMock(), raw_extractor)
+    retry = run_task("T-crash", "resolve", OraclePlanner(refund_in_full(CASE_TICKET, 7000)), again)
+    assert retry.outcome == "rejected"
+    assert again.provider.effects == []  # type: ignore[attr-defined]
+
+
+def test_a_recovery_failure_is_audited(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gate 3 fix re-review #3: an exception from recover() escaped with no audit row."""
+
+    def broken(db: sqlite3.Connection, provider: Any) -> None:
+        raise sqlite3.OperationalError("disk I/O error")
+
+    env = _env()
+    monkeypatch.setattr("kernel.run.recover", broken)
+    with pytest.raises(sqlite3.OperationalError):
+        run_plan(refund_from_ticket_text(CASE_TICKET), env, run_id="r-rec")
+    [row] = [r for r in _audit(env) if r["run_id"] == "r-rec"]
+    assert row["outcome"] == "failed" and "OperationalError" in row["reason"]
+    assert env.provider.effects == []  # type: ignore[attr-defined]

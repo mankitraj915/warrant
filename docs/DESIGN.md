@@ -450,8 +450,13 @@ untrusted origins of each component, so the components and origins a rule consid
 read from it. The predicate inputs (the trusted rows read) are not logged; the trace shows the
 decision, not a replay of it. Each run writes a `decided` row before its first effect and a
 `final` row with the outcome; recovery of pending refunds writes its own `recover` rows
-(Gate 2 review #5). A run that an exception escapes still writes its `final` row:
+(Gate 2 review #5). A run that an exception escapes still writes its `final` row, whether the
+exception comes from the planner, recovery, the approver, execution or a bug:
 - the outcome is `failed`, and the reason names the exception;
+- the row keeps what the run had decided (actions, verdicts, rule decisions, approval) and every
+  effect that completed before the exception, including a refund whose record had to be
+  restored (Gate 3 fix re-review #2, #3; D-072);
+- a planner failure spends the task id, like any audited run of the task;
 - the unfinished step is rolled back, and a pending approval request is marked `rejected`;
 - the exception is re-raised, and the run id is spent;
 - a leaked ticket that does not exist is audited as `halted`, like an in-plan halt.
