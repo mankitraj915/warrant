@@ -102,8 +102,12 @@ required mutant caught at its k-seed design; held-out 2 caught, 3 missed, perman
 Gate 3 findings 1-9 are fixed (PRs #16-#24, D-061 to D-069) and generator coverage (#13) is
 merged (PR #25, D-070). Issues #10-#12 (held-out misses) stay open until stage d's post-fix
 held-out result. Stage d is issue #26: started as GitHub Actions run 41370326167 on main at
-13cd4d8 (`gh run view 41370326167`; artifact `stage-d-<sha>`); the re-review of the fixes was
-started at the same time. Local memory: the commit charge has reached 32 GB of 32.6 GB with
+13cd4d8 (`gh run view 41370326167`; artifact `stage-d-<sha>`). The re-review of the fixes is
+done (`docs/reviews/GATE3_FIX_REVIEW.md`, responses in DECISIONS); its six findings are fixed
+in PRs #36-#38 (D-071 run lock names the database, D-072 failed-run audit, D-073 base-fail
+job). Those touch `kernel/runlock.py`, `run.py` and `execution.py` after 13cd4d8, so stage d's
+results are for 13cd4d8's kernel; decide on a stage-d re-run at the final commit when it ends
+(free Actions minutes, D-060). Local memory: the commit charge has reached 32 GB of 32.6 GB with
 other projects running; when a local run fails with "memory allocation failed", verify on CI.
 
 **Owner delegation (2026-11-02): ship v1 autonomously.** Needs the owner's explicit yes:
@@ -123,10 +127,14 @@ GitHub Actions, never in session. Plan and progress (tick as done):
    regression tests failing on 7da1652; generator coverage (domain-valid values in untrusted
    fields); post-fix held-out result reported separately (in stage d).
 4. [ ] Step 3 (stage d) on the fixed commit: check, k-seed at fresh seeds, post-fix held-out,
-   evals and sweeps; update RESULTS; re-review; tag gate-3 at the final commit.
+   evals and sweeps; update RESULTS (also drop "Claude Code session" wording there); [x]
+   re-review and its fixes; tag gate-3 at the final commit.
 5. [ ] Step 4: v1 ships without a local LLM planner; optional CI-only small-model job.
-6. [ ] Step 5: README, docs/WHAT_WENT_WRONG.md, docs/adr/ (8-10), docs/PROCESS.md,
-   docs/STUDY_GUIDE.md, code trimming pass, `tasks.py demo` plus a committed transcript.
+6. [ ] Step 5: [ ] README (drafted, uncommitted until stage d's numbers; `tests/test_doc_links.py`
+   checks its links), [x] docs/WHAT_WENT_WRONG.md, [x] docs/adr/ (10), [x] docs/PROCESS.md,
+   [x] docs/STUDY_GUIDE.md, [x] code trimming pass (no unreferenced names, markers or
+   commented-out code in `kernel/`; the mutant extension flags stay; record in DECISIONS with
+   stage d), [x] `tasks.py demo` plus a committed transcript.
 7. [ ] Step 6: final skeptical review, fixes, fresh-clone reproduction, tag v1.0 and release,
    hand-off report.
 
