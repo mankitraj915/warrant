@@ -1,0 +1,78 @@
+name: fuzz six NI properties
+
+# The chunked non-interference fuzz (scripts/fuzz_chunks.py, D-024) for all six NI
+# properties, 20 chunks x 1,000 examples each, at a fixed ref (issue #49). The seeds
+# were fixed in the issue before the first run; chunk i uses base + i. The job checks
+# out the ref itself, so the code measured is exactly that ref's, whatever branch
+# holds this file. Each chunk's row (seed, exit, seconds, peak RSS, commit) is uploaded.
+
+on:
+  push:
+    branches: ["ci/49-fuzz-v1.0"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "ref to fuzz"
+        required: true
+        default: "v1.0"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: ni-shapes, test: "tests/test_noninterference.py::test_noninterference", seed: 202620100}
+          - {name: multirun-shapes, test: "tests/test_noninterference.py::test_noninterference_multirun", seed: 202620200}
+          - {name: ni5-shapes, test: "tests/test_approval_binding.py::test_ni5_executed_set_is_the_approved_set", seed: 202620300}
+          - {name: ni-grammar, test: "tests/test_noninterference.py::test_noninterference_grammar", seed: 202620400}
+          - {name: multirun-grammar, test: "tests/test_noninterference.py::test_noninterference_multirun_grammar", seed: 202620500}
+          - {name: ni5-grammar, test: "tests/test_approval_binding.py::test_ni5_executed_set_is_the_approved_set_grammar", seed: 202620600}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || 'v1.0' }}
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.29"
+          python-version: "3.12"
+      - run: uv sync --locked
+      - name: Record commit and runner specs
+        run: |
+          mkdir -p results/fuzz
+          git rev-parse HEAD > results/fuzz/commit.txt
+          cat results/fuzz/commit.txt
+          uv run --locked python - <<'EOF' > results/fuzz/runner-${{ matrix.name }}.json
+          import json, os, platform, subprocess
+          meminfo = dict(line.split(":", 1) for line in open("/proc/meminfo"))
+          cpu = next((l.split(":", 1)[1].strip() for l in open("/proc/cpuinfo") if l.startswith("model name")), "")
+          print(json.dumps({
+              "commit": subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip(),
+              "workflow_sha": os.environ["GITHUB_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "property": "${{ matrix.name }}",
+              "runner_image_version": os.environ.get("ImageVersion", ""),
+              "cpus": os.cpu_count(),
+              "cpu_model": cpu,
+              "mem_total": meminfo["MemTotal"].strip(),
+              "python": platform.python_version(),
+          }, indent=1))
+          EOF
+      - name: Fuzz ${{ matrix.name }}
+        run: >
+          uv run --locked python scripts/fuzz_chunks.py
+          --test "${{ matrix.test }}" --base-seed ${{ matrix.seed }}
+          --chunks 20 --examples 1000
+          --log results/fuzz/fuzz-${{ matrix.name }}.jsonl
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-${{ matrix.name }}
+          path: results/fuzz
+          retention-days: 90
