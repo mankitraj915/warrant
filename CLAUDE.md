@@ -98,8 +98,9 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 
 ## Current status
 
-Phase: **v1.0.1 shipped** (Gate 3 passed 2026-11-02, tag `gate-3` at 9f2f0c3; v1.0 on PR #48's
-merge commit a8597ac; v1.0.1, docs only, on PR #53's merge commit 620cff4). Everything is on `main` (repo
+Phase: **v1.0.2 shipped** (Gate 3 passed 2026-11-02, tag `gate-3` at 9f2f0c3; v1.0 on PR #48's
+merge commit a8597ac; v1.0.1, docs only, on PR #53's merge commit 620cff4; v1.0.2 on the merge
+commit of the release PR for issue #61). Everything is on `main` (repo
 github.com/mankitraj915/warrant, private). Work goes through one issue, branch and PR per
 change, merged with merge commits; CI runs `check` and the new-tests-fail-on-base job (D-060,
 D-063, D-066). History through stage c: DECISIONS D-056 to D-059 and "Gate 3 baseline" (every
@@ -146,13 +147,16 @@ GitHub Actions, never in session. Plan and progress (tick as done):
    v1.0 tagged on PR #48's merge commit, with a GitHub release; hand-off report given. Repo
    stays private. Before publishing, the owner decides whether the working records (CLAUDE.md,
    DECISIONS, docs/reviews/, SPEC's process text), which name the tooling, stay in a public
-   repo. Open: #10, #11, #52 (v1.1), the language-model planner and `tasks.py report` (v1.1),
+   repo. Open: #10, #11, #60 (v1.1), the language-model planner and `tasks.py report` (v1.1),
    stale comments deferred by the v1 review.
 8. [x] Fuzz at v1.0 (issue #49): all six NI properties, 20 x 1,000 each, seeds from 202620100,
    0 failing in 120,000 examples (GitHub Actions run 41430446343; the first attempt,
    41429151228, was derandomized and does not count, #52). Recorded in RESULTS and DECISIONS,
    README limitation removed, released as v1.0.1 (PR #53). MIT LICENSE added after the tag
    (PR #51, issue #50).
+9. [x] v1.0.2: the `fuzz` profile no longer inherits Hypothesis's CI profile (#52, PR #59,
+   D-076; the base-fail job cannot judge a conftest fix and was red by decision, #60);
+   WHAT_WENT_WRONG entry on the derandomized run (#57, PR #58); version 1.0.2 (#61).
 
 Never run the fuzz or the owner-run stages inside a session. `check` takes about 2 min
 (witness replays under the issue #13 generators, D-070).
