@@ -54,6 +54,9 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
   Extra arguments pass through: `tasks.py fuzz --hypothesis-seed=N` reproduces a run.
 - `fuzz-chunks`: the same fuzzing as sequential chunks with recorded seeds and measured peak
   RSS (`--test --chunks --examples --base-seed`; log in `results/fuzz_chunks.jsonl`; D-024).
+  Under `CI`/`GITHUB_ACTIONS` env vars Hypothesis's `ci` profile derandomizes the fuzz profile
+  and ignores the seed (issue #52, v1.1); `.github/workflows/fuzz-six.yml` unsets both and
+  checks `derandomize: False` before fuzzing (DECISIONS "Fuzz of all six NI properties at v1.0").
 - `eval`: default offline evaluation (no LLM): dev suite (40 user tasks, 11 injections) ×
   {warrant+oracle, warrant+gullible, undefended+gullible, delimited+gullible, leaked+gullible,
   undefended+attacker, delimited+attacker, leaked+attacker} (D-051, D-052), Warrant
@@ -95,7 +98,8 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 
 ## Current status
 
-Phase: **v1.0 shipped** (Gate 3 passed 2026-11-02, tag `gate-3` at 9f2f0c3; v1.0 on PR #48's merge commit). Everything is on `main` (repo
+Phase: **v1.0.1 shipped** (Gate 3 passed 2026-11-02, tag `gate-3` at 9f2f0c3; v1.0 on PR #48's
+merge commit a8597ac; v1.0.1, docs only, on PR #53's merge commit 620cff4). Everything is on `main` (repo
 github.com/mankitraj915/warrant, private). Work goes through one issue, branch and PR per
 change, merged with merge commits; CI runs `check` and the new-tests-fail-on-base job (D-060,
 D-063, D-066). History through stage c: DECISIONS D-056 to D-059 and "Gate 3 baseline" (every
@@ -140,10 +144,15 @@ GitHub Actions, never in session. Plan and progress (tick as done):
    (`V1_FIX_REVIEW.md`), responses in DECISIONS; fixes (PR #48); fresh-clone reproduction
    following only the README (local, 341ad19: check, both evals, demo; DECISIONS "v1 release");
    v1.0 tagged on PR #48's merge commit, with a GitHub release; hand-off report given. Repo
-   stays private. Before publishing, the owner decides on a LICENSE and on whether the working
-   records (CLAUDE.md, DECISIONS, docs/reviews/, SPEC's process text), which name the tooling,
-   stay in a public repo. Open: #10, #11 (v1.1), a fuzz run at the tagged commit, the
-   language-model planner and `tasks.py report` (v1.1), stale comments deferred by the v1 review.
+   stays private. Before publishing, the owner decides whether the working records (CLAUDE.md,
+   DECISIONS, docs/reviews/, SPEC's process text), which name the tooling, stay in a public
+   repo. Open: #10, #11, #52 (v1.1), the language-model planner and `tasks.py report` (v1.1),
+   stale comments deferred by the v1 review.
+8. [x] Fuzz at v1.0 (issue #49): all six NI properties, 20 x 1,000 each, seeds from 202620100,
+   0 failing in 120,000 examples (GitHub Actions run 41430446343; the first attempt,
+   41429151228, was derandomized and does not count, #52). Recorded in RESULTS and DECISIONS,
+   README limitation removed, released as v1.0.1 (PR #53). MIT LICENSE added after the tag
+   (PR #51, issue #50).
 
 Never run the fuzz or the owner-run stages inside a session. `check` takes about 2 min
 (witness replays under the issue #13 generators, D-070).
