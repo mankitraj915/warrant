@@ -102,14 +102,14 @@ D-063, D-066). History through stage c: DECISIONS D-056 to D-059 and "Gate 3 bas
 required mutant caught at its k-seed design; held-out 2 caught, 3 missed, permanent in RESULTS).
 
 Gate 3 findings 1-9 are fixed (PRs #16-#24, D-061 to D-069) and generator coverage (#13) is
-merged (PR #25, D-070). Issues #10-#12 (held-out misses) stay open until stage d's post-fix
-held-out result. Stage d is issue #26: started as GitHub Actions run 41370326167 on main at
-13cd4d8 (`gh run view 41370326167`; artifact `stage-d-<sha>`). The re-review of the fixes is
-done (`docs/reviews/GATE3_FIX_REVIEW.md`, responses in DECISIONS); its six findings are fixed
-in PRs #36-#38 (D-071 run lock names the database, D-072 failed-run audit, D-073 base-fail
-job). Those touch `kernel/runlock.py`, `run.py` and `execution.py` after 13cd4d8, so stage d's
-results are for 13cd4d8's kernel; decide on a stage-d re-run at the final commit when it ends
-(free Actions minutes, D-060). Local memory: the commit charge has reached 32 GB of 32.6 GB with
+merged (PR #25, D-070). The re-review of the fixes is done (`docs/reviews/GATE3_FIX_REVIEW.md`);
+its six findings are fixed in PRs #36-#38 (D-071 to D-073). Stage d (issue #26) ran twice on
+GitHub Actions: run 41370326167 at 13cd4d8 (a record) and run 41386725959 at 9f2f0c3, the final
+Gate 3 commit, tagged `gate-3`. RESULTS and README numbers come from the 9f2f0c3 run only
+(owner); both runs are identical row for row (DECISIONS "Stage d at the final Gate 3 commit").
+Post-fix held-out: #12 caught and closed; #10 and #11 still missed, open, in README Limitations.
+v1.0's `kernel/`, `planners/`, `evals/`, `scripts/` and `tests/` are kept byte-identical to
+9f2f0c3, so stale code comments (v1 review findings 10 and 15) wait for v1.1. Local memory: the commit charge has reached 32 GB of 32.6 GB with
 other projects running; when a local run fails with "memory allocation failed", verify on CI.
 
 **Owner delegation (2026-11-02): ship v1 autonomously.** Needs the owner's explicit yes:
@@ -128,9 +128,9 @@ GitHub Actions, never in session. Plan and progress (tick as done):
 3. [x] Steps 1.2/1.3 as issue + branch + PR each (merge commits): findings 1-9 with
    regression tests failing on 7da1652; generator coverage (domain-valid values in untrusted
    fields); post-fix held-out result reported separately (in stage d).
-4. [ ] Step 3 (stage d) on the fixed commit: check, k-seed at fresh seeds, post-fix held-out,
-   evals and sweeps; update RESULTS (also drop "Claude Code session" wording there); [x]
-   re-review and its fixes; tag gate-3 at the final commit.
+4. [x] Step 3 (stage d) on the fixed commit: check, k-seed at fresh seeds, post-fix held-out,
+   evals and sweeps (run 41386725959 at 9f2f0c3); RESULTS updated; re-review and its fixes;
+   tag gate-3 at 9f2f0c3.
 5. [x] Step 4: v1 ships without a local LLM planner (D-074; RESULTS says so); the optional
    CI-only small-model job is skipped (owner, 2026-11-02). RESULTS stays hand-written (D-075).
 6. [ ] Step 5: [ ] README (drafted, uncommitted until stage d's numbers; `tests/test_doc_links.py`
