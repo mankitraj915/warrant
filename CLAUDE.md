@@ -54,9 +54,9 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
   Extra arguments pass through: `tasks.py fuzz --hypothesis-seed=N` reproduces a run.
 - `fuzz-chunks`: the same fuzzing as sequential chunks with recorded seeds and measured peak
   RSS (`--test --chunks --examples --base-seed`; log in `results/fuzz_chunks.jsonl`; D-024).
-  Under `CI`/`GITHUB_ACTIONS` env vars Hypothesis's `ci` profile derandomizes the fuzz profile
-  and ignores the seed (issue #52, v1.1); `.github/workflows/fuzz-six.yml` unsets both and
-  checks `derandomize: False` before fuzzing (DECISIONS "Fuzz of all six NI properties at v1.0").
+  Up to v1.0.1, Hypothesis's `ci` profile derandomized the fuzz profile on CI runners and the
+  seed was ignored; fixed in v1.0.2 (issue #52, D-076). `.github/workflows/fuzz-six.yml` still
+  unsets `CI`/`GITHUB_ACTIONS` and checks `derandomize: False`, because it checks out `v1.0`.
 - `eval`: default offline evaluation (no LLM): dev suite (40 user tasks, 11 injections) ×
   {warrant+oracle, warrant+gullible, undefended+gullible, delimited+gullible, leaked+gullible,
   undefended+attacker, delimited+attacker, leaked+attacker} (D-051, D-052), Warrant

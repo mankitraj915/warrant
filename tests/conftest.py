@@ -7,6 +7,7 @@ Hypothesis runs derandomized under the default ``check`` profile so
 ``scripts/tasks.py check`` is reproducible. ``HYPOTHESIS_PROFILE=fuzz`` (the
 ``fuzz`` target) runs long and randomized; ``WARRANT_FUZZ_EXAMPLES`` sets its
 example count (default 20,000) so ``scripts/fuzz_chunks.py`` can run bounded chunks.
+``fuzz`` is the same on a CI runner as off it (issue #52).
 
 Neither profile uses an example database, so no run replays examples saved by an
 earlier one, and generation is pinned to the seed alone (``tests/determinism.py``,
@@ -102,8 +103,14 @@ def pytest_unconfigure() -> None:
 settings.register_profile(
     "check", max_examples=200, derandomize=True, deadline=None, print_blob=True, database=None
 )
+# On a CI runner Hypothesis loads its own ``ci`` profile (derandomize=True) at import, and a
+# profile without a parent inherits from it. ``fuzz`` names Hypothesis's built-in defaults as
+# its parent and sets ``derandomize=False`` itself, so it is the same on and off CI and honours
+# ``--hypothesis-seed`` (issue #52; tests/test_hypothesis_profiles.py).
 settings.register_profile(
     "fuzz",
+    parent=settings.get_profile("default"),
+    derandomize=False,
     max_examples=int(os.environ.get("WARRANT_FUZZ_EXAMPLES", "20000")),
     deadline=None,
     print_blob=True,
