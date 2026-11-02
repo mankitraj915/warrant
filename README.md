@@ -159,9 +159,6 @@ executed: []
   held-out mutants that switch off these checks are still missed after the generator fix, and
   no deterministic test covers them. They are open issues, not known bugs
   ([RESULTS](docs/RESULTS.md#after-the-gate-3-fixes-commit-9f2f0c3-stage-d)).
-- **The large fuzz runs predate the last fixes.** The 10,000- and 20,000-example runs were
-  before the Gate 3 fixes; at the tagged commit the properties ran in `check`, 200 examples
-  each.
 - **No real-model results.** The security claim does not depend on the model, but the utility of
   a real planner is not measured. v1 has no language-model planner; it is planned for v1.1
   ([D-074](docs/DECISIONS.md#d-074-v1-ships-without-a-language-model-planner-owner-2026-11-02-issue-44)).

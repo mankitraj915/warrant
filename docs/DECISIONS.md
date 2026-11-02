@@ -3286,3 +3286,51 @@ commands plus the demo it names.
 Between them only documentation, the Makefile and the package version change; `kernel/`,
 `planners/`, `evals/`, `scripts/`, `tests/` and `domain/` are identical
 (`git diff --stat gate-3 v1.0 -- kernel planners evals scripts tests domain` is empty).
+
+## Fuzz of all six NI properties at v1.0 (GitHub Actions run 41430446343, verified 2026-11-02; issue #49)
+
+**Why.** The 10,000- and 20,000-example fuzz runs were at 6e27f60 and c4b52a6, before the Gate 3
+fixes changed the kernel (D-061 to D-072) and the generators (D-070). The owner asked for the
+chunked fuzz of all six NI properties at the v1.0 commit, 20 × 1,000 examples each, with fresh
+recorded seeds.
+
+**How.** `phase3-run --stage a` does not do this at v1.0: it fuzzes only the three shape
+properties, reuses the 6e27f60 seeds and contains a mutant step whose mode no longer exists. So a
+workflow on branch `ci/49-fuzz-v1.0` (`.github/workflows/fuzz-six.yml`, commit 009fed7) runs
+`scripts/fuzz_chunks.py` as it is at v1.0. It checks out the `v1.0` tag itself and runs one job
+per property. The seeds were fixed in issue #49 before the first run, and chunk i uses base + i.
+
+**First attempt does not count** (run 41429151228, workflow commit 31a1afa). Every chunk passed,
+but each property's 20 chunks reported identical statistics, for example 1,000 passing and 29
+invalid in all 20 single-run shape chunks. On a CI runner, Hypothesis 6.170.13 loads its
+built-in `ci` profile (`derandomize=True`) when `CI` or `GITHUB_ACTIONS` is set. The `fuzz`
+profile in `tests/conftest.py` does not set `derandomize`, so it inherits `True`, and a
+derandomized run ignores `--hypothesis-seed`. So that run repeated the same 1,000 examples twenty
+times per property.
+- Unaffected: every earlier large fuzz run, which ran locally; the mutant measurements, including
+  stage d on CI, which set `derandomize=False` with `@seed`; and `check`, which is derandomized
+  by design.
+- The `fuzz` profile itself is fixed in v1.1 (issue #52), because the fix changes `tests/`.
+- Diagnosis in this session: five short local runs of the single-run shape property, outside CI.
+  Seeds 11 and 99999 at 200 examples gave 13 and 10 invalid with different event shares, and
+  seeds 202620100–202620102 at 1,000 gave different statistics. So seeds are honoured outside CI.
+  These runs are diagnosis only, not evidence.
+
+**Run that counts** (run 41430446343, workflow commit 009fed7). The fuzz step runs with `CI` and
+`GITHUB_ACTIONS` unset, after a guard step that fails unless the `fuzz` profile has
+`derandomize=False`. All six guards printed `derandomize: False`. Every row records commit
+a8597ac (`v1.0`), and the chunks' statistics now differ (13 to 18 distinct invalid counts per
+property).
+
+| property | test | seeds | passing | failing | invalid | time | peak RSS |
+|---|---|---|---|---|---|---|---|
+| single-run NI, shapes | `test_noninterference` | 202620100–119 | 20,000 | 0 | 595 | 287 s | 258.5 MB |
+| multi-run NI, shapes | `test_noninterference_multirun` | 202620200–219 | 20,000 | 0 | 2,173 | 135 s | 258.4 MB |
+| NI-5, shapes | `test_ni5_executed_set_is_the_approved_set` | 202620300–319 | 20,000 | 0 | 1,339 | 179 s | 257.9 MB |
+| single-run NI, grammar | `test_noninterference_grammar` | 202620400–419 | 20,000 | 0 | 909 | 299 s | 259.0 MB |
+| multi-run NI, grammar | `test_noninterference_multirun_grammar` | 202620500–519 | 20,000 | 0 | 1,350 | 352 s | 258.8 MB |
+| NI-5, grammar | `test_ni5_executed_set_is_the_approved_set_grammar` | 202620600–619 | 20,000 | 0 | 1,779 | 185 s | 258.0 MB |
+
+All 120 chunks exited 0 with "1 passed", and no counterexample was found. The README limitation
+"the large fuzz runs predate the last fixes" is removed, and RESULTS gains the v1.0 row. v1.0.1
+carries only these documentation changes. The workflow and the LICENSE (#50) merge after its tag.
