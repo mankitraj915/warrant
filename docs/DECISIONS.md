@@ -2964,3 +2964,42 @@ refunds admitted by `ticket_order_ownership`.
 
 All three fail on 43b1d02 behaviourally: no `RunLocked`, or "DID NOT RAISE". They check
 outcomes by exception name, so they collect on base.
+
+## D-072 A failed run's audit row says what was decided and what moved (2026-11-02; re-review #2 and #3, issue #34)
+
+**Problem.**
+- *#2:* `_audit_failure` wrote a bare `failed` row with no actions and no executed effects.
+  With two refunds where the second's record was lost, the provider paid both while the final
+  row said nothing executed; only the `decided` row and the refunds table told the truth.
+- *#3:* `recover()` ran before the audited region and `planner.plan` ran outside `run_plan`, so
+  an exception from either left no audit row, and a new `Environment` could plan the task
+  again.
+
+**Decision.**
+- `execute` appends each completed effect to a list the caller owns, so the effects survive an
+  exception. `RecordLost` appends the restored refund before raising: money moved.
+- `_run_plan` keeps a progress holder (the latest decided `RunResult` and that list); the failed
+  row is built from it, so it carries actions, verdicts, rule decisions, approval fields and the
+  effects that completed.
+- `recover()` and the run-id check are inside the audited region. In `run_task`, a planner
+  exception writes a failed row with the task id and the planner-input hash, which spends the
+  task id.
+- The handlers catch `BaseException` and re-raise it, so an interrupt is audited too.
+
+**Rejected.**
+- *Reading effects back from the refunds table in the failure handler.* The table has no run
+  id, and local effects (credits, closures) live elsewhere; the executor already knows what it
+  did.
+- *Wrapping the exception in a new type that carries progress.* Callers and tests catch
+  `RecordLost` and the approver's own exceptions by type; a wrapper changes that interface.
+
+**Known edge.** A recovery failure on a run id that was already used writes a second, `failed`
+row under that id. The id stays spent either way.
+
+**Regression tests.** `tests/test_audit.py`:
+- `test_a_failed_run_records_its_actions_and_the_effects_that_completed`;
+- `test_a_planner_that_raises_is_audited_and_its_task_spent`;
+- `test_a_recovery_failure_is_audited`.
+
+All three fail on 17c4760: an empty `actions` list in the failed row, and no audit row at all
+for the other two.
