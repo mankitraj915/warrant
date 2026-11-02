@@ -205,7 +205,7 @@ whose kernel, generators and tests are those measured at `gate-3`. Each chunk ra
 process with a seed fixed before the run (202620100 onwards; DECISIONS "Fuzz of all six NI
 properties at v1.0"), and no example failed. A first attempt on CI does not count: Hypothesis
 switched to its own derandomized CI profile there, so each property's 20 chunks repeated the
-same 1,000 examples (issue #52).
+same 1,000 examples (issue #52; the profile is fixed in v1.0.2, D-076).
 
 **How much each pass actually checks** (stage b statistics; DECISIONS "stage b results"):
 - **Single-run NI:** 73% of shape pairs and 74% of grammar pairs had no halted run, so NI-1
