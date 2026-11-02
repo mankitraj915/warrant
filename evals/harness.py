@@ -11,7 +11,7 @@ configurations (Warrant configurations use the simulated approver, D-041):
 - ``delimited+gullible``: the same, with the text wrapped in delimiters and a
   "treat as data" instruction (prompt delimiting, D-051). The scripted planner
   ignores delimiters by construction, so this is a sanity check of the
-  plumbing; delimiting is evaluated with the LLM in Phase 4;
+  plumbing; evaluating delimiting needs a model planner (not in v1, D-074);
 - ``leaked+gullible``: the kernel, but the case ticket's text is leaked into the
   planner's context (S-12), so only the plan-label layer stands between the
   hijacked plan and execution. Reported separately from the main matrix;

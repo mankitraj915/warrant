@@ -3042,3 +3042,51 @@ commit and a change, and runs the script in this tree against it:
 
 Both fail with the script at 17c4760 (exit 0 where 1 and 2 are expected; checked by swapping
 the old script in, this session).
+
+## D-074 v1 ships without a language-model planner (owner, 2026-11-02; issue #44)
+
+**Decision.** v1 does not include Phase 4 (SPEC §8): no `llm_local` planner, no `eval-llm`
+target, no `get_model.sh`. The optional CI-only small-model job considered for v1 is not built
+either. A language-model planner is planned for v1.1.
+
+**Why.**
+- *The security claim does not depend on a model.* Every security test, the non-interference
+  properties, the mutant measurements and every number in RESULTS run with scripted planners
+  and no model (CLAUDE.md: "the LLM affects utility, never safety"). A model planner would add
+  a utility measurement, not security evidence.
+- *This machine has no room for one.* Measured free memory before owner-run steps fell to under
+  50 MB at worst with the owner's other projects running (D-055). A quantized model's resident
+  memory would come out of those projects, and a run that fails for memory measures nothing.
+- *A CI-only job would be the only model result.* It could run on a 7 GB GitHub runner, but its
+  numbers would not be reproducible on the 8 GB laptop the project targets, and a small model's
+  plan rates say little about a larger one (SPEC §10 already forbids that transfer). So it is
+  not worth delaying v1 for.
+
+**What v1 therefore does not claim.** RESULTS states that the utility of a real planner is
+unmeasured: the utility figures are for the oracle and scripted planners. Prompt delimiting
+is only a plumbing check, because both scripted planners ignore delimiters by construction.
+
+**For v1.1** (conditions carried from the v1 plan): a model of at most 1.5B parameters with a
+permissive licence; grammar-constrained decoding into the plan language; at least 3 seeds;
+peak RSS, tokens per second and per-task latency reported with spread; a refusal to start
+below a stated free-memory threshold (D-055); results labelled with where they ran.
+
+**Rejected.**
+- *Building the CI-only job now, non-blocking.* It would put a model number in v1 that the
+  target machine cannot reproduce.
+- *A hosted model.* SPEC allows it only as an off-by-default comparison adapter, and it needs
+  an account and a key, which the reproducibility constraint excludes.
+
+## D-075 RESULTS stays hand-written in v1 (2026-11-02; issue #44)
+
+**Decision.** `tasks.py report` (SPEC Phase 5) is not built for v1. `docs/RESULTS.md` is
+written by hand from the stage artifacts. Each number names the command, the commit and the
+run or file it came from, as before.
+
+**Why.** The numbers come from several kinds of output: eval and sweep JSON, mutant JSON
+lines, and step logs from local and GitHub Actions runs. A generator that covers all of them
+is a feature of its own, and it would be written and checked in the last days of v1. A
+hand-written page that cites its sources can be checked against those sources directly.
+
+**Cost.** A transcription error is possible. The v1 skeptical review checks RESULTS against
+the artifacts. The generator is planned for v1.1.
