@@ -3368,3 +3368,16 @@ because the `ci` profile is chosen when Hypothesis is imported):
 
 The fuzz workflow (`.github/workflows/fuzz-six.yml`) keeps its workaround, because it checks out
 `v1.0`, which predates this fix.
+
+**Finding: the base-fail job cannot judge this fix (issue #60).** `new-tests-fail-on-base` copies
+HEAD's `conftest.py` onto the base worktree, because it treats `conftest.py` as test
+infrastructure (D-066). Here `conftest.py` is the code being fixed, so the job ran the new tests
+against the fix and reported both `PASSED on base` (run 41444209357, base 219570d). The same check
+done by hand, with a worktree at 219570d and only `tests/test_hypothesis_profiles.py` copied in (so
+base's own conftest), fails both tests: identical draws for the two seeds, and `derandomize=True`
+with `suppress_health_check=(HealthCheck.too_slow,)` on CI against `False` and `()` off it. The PR
+merges with the job red and this record as its evidence. The job's rule is not changed in v1.0.2,
+because that would change the gate; issue #60 is for v1.1. Rejected: moving the fix out of
+`conftest.py` (into `tests/determinism.py`, which the job keeps at base) only to get a green job.
+That would hide which file registers the profiles, and it would also change `settings.default`
+for `scripts/mutant_rates.py`.
