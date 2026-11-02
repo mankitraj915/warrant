@@ -3334,3 +3334,50 @@ property).
 All 120 chunks exited 0 with "1 passed", and no counterexample was found. The README limitation
 "the large fuzz runs predate the last fixes" is removed, and RESULTS gains the v1.0 row. v1.0.1
 carries only these documentation changes. The workflow and the LICENSE (#50) merge after its tag.
+
+## D-076 The `fuzz` profile is the same on and off CI (2026-11-02; issue #52)
+
+**Problem.** On a CI runner, Hypothesis 6.170.13 loads its built-in `ci` profile at import
+(`derandomize=True`, `suppress_health_check=[too_slow]`). A profile registered without a parent
+inherits from the loaded one, so `fuzz` was derandomized on CI and ignored `--hypothesis-seed`.
+This voided the first fuzz at v1.0 (run 41429151228; "Fuzz of all six NI properties at v1.0").
+The owner asked for the fix in v1.0.2 rather than v1.1.
+
+**Decision.** `tests/conftest.py` registers `fuzz` with `parent=settings.get_profile("default")`,
+Hypothesis's built-in defaults, and sets `derandomize=False` explicitly. Off CI the parent was
+already those defaults, so local fuzz runs, including every earlier recorded one, are unchanged.
+
+**Tests, written first** (`tests/test_hypothesis_profiles.py`; each starts a fresh interpreter,
+because the `ci` profile is chosen when Hypothesis is imported):
+- `test_fuzz_profile_honours_the_seed_on_ci`: with `CI` and `GITHUB_ACTIONS` set, two seeds go
+  through `hypothesis.core.global_force_seed`, the hook `--hypothesis-seed` sets, and must draw
+  different examples; `derandomize` must be False. On the old profile, seeds 202620100 and
+  202620101 drew identical examples (`[0, 56, 4294967296, 1012589, 81313335, 4294967295, ...]`
+  both times), so the test failed.
+- `test_fuzz_profile_is_the_same_on_and_off_ci`: the loaded `fuzz` settings must be identical
+  with and without Hypothesis's CI variables. On the old profile they differed in `derandomize`
+  and `suppress_health_check`.
+
+**Rejected.**
+- Setting only `derandomize=False`. That fixes the seed but leaves `fuzz` inheriting the CI
+  health-check suppression, so a fuzz run would still behave differently on CI.
+- Unsetting the CI variables in every caller (`fuzz_chunks.py`, `tasks.py fuzz`). That is the
+  workaround the fuzz workflow uses; it guards one caller and leaves the profile wrong.
+- The same change for `check`. `check` is derandomized by design. On CI it also inherits the
+  `too_slow` suppression, but that changes no example and is not part of #52.
+
+The fuzz workflow (`.github/workflows/fuzz-six.yml`) keeps its workaround, because it checks out
+`v1.0`, which predates this fix.
+
+**Finding: the base-fail job cannot judge this fix (issue #60).** `new-tests-fail-on-base` copies
+HEAD's `conftest.py` onto the base worktree, because it treats `conftest.py` as test
+infrastructure (D-066). Here `conftest.py` is the code being fixed, so the job ran the new tests
+against the fix and reported both `PASSED on base` (run 41444209357, base 219570d). The same check
+done by hand, with a worktree at 219570d and only `tests/test_hypothesis_profiles.py` copied in (so
+base's own conftest), fails both tests: identical draws for the two seeds, and `derandomize=True`
+with `suppress_health_check=(HealthCheck.too_slow,)` on CI against `False` and `()` off it. The PR
+merges with the job red and this record as its evidence. The job's rule is not changed in v1.0.2,
+because that would change the gate; issue #60 is for v1.1. Rejected: moving the fix out of
+`conftest.py` (into `tests/determinism.py`, which the job keeps at base) only to get a green job.
+That would hide which file registers the profiles, and it would also change `settings.default`
+for `scripts/mutant_rates.py`.
