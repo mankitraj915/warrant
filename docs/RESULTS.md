@@ -198,11 +198,14 @@ matter:
 | Phase 3, split generators (c4b52a6) | the three grammar-plan properties | 10,000 each | 0 (stage b) |
 | Phase 3, split generators (c4b52a6) | all six properties, statistics runs | 2,000 each | 0 (stage b) |
 | Gate 3 final (9f2f0c3) | all six properties, in `check` (derandomized) | 200 each | 0 (stage d) |
+| v1.0 (a8597ac) | all six properties, 20 chunks of 1,000, fresh seeds | 20,000 each | 0 (GitHub Actions run 41430446343) |
 
-**The large fuzz runs predate the Gate 3 fixes.** The 10,000- and 20,000-example runs were at
-6e27f60 and c4b52a6. The Gate 3 fixes then changed the kernel (D-061 to D-072) and the generators
-(D-070). At the tagged commit the six properties ran only inside `check`, at 200 examples each. A
-fuzz run at the tagged commit is a one-command CI run that v1 does not include.
+**At v1.0.** All six properties ran 20,000 examples each (120,000 in all) at the `v1.0` tag,
+whose kernel, generators and tests are those measured at `gate-3`. Each chunk ran in its own
+process with a seed fixed before the run (202620100 onwards; DECISIONS "Fuzz of all six NI
+properties at v1.0"), and no example failed. A first attempt on CI does not count: Hypothesis
+switched to its own derandomized CI profile there, so each property's 20 chunks repeated the
+same 1,000 examples (issue #52).
 
 **How much each pass actually checks** (stage b statistics; DECISIONS "stage b results"):
 - **Single-run NI:** 73% of shape pairs and 74% of grammar pairs had no halted run, so NI-1
