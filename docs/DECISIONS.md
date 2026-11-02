@@ -2846,3 +2846,64 @@ Several listed gaps are addressed elsewhere: concurrency (D-061, D-063), untrust
 (#13), and provider failures in paired runs (D-068, after v1).
 
 No test: documentation only.
+
+## D-070 Generator coverage: domain-valid untrusted values (2026-11-02; issue #13, step 1.3)
+
+**Problem.**
+- Three Gate 3 held-out mutants were missed at every design, 108,462 examples each:
+  - #10, the goodwill rule no longer requires a trusted reason;
+  - #11, `contains` ignores element labels;
+  - #12, approval consumption ignores the hash.
+- The common cause: untrusted fields were generated as random text, so an untrusted value
+  was never also a domain-valid one, and code guarded by domain checks was never reached
+  with untrusted data.
+- Separately, the NI-5 property's approver always answered with the right hash for the
+  right run.
+
+**Decision: fix the class, as issue #13 specifies.**
+1. **Payloads** (`planners/fuzz.py`). Untrusted cells may also be a credit reason or
+   resolution code, an existing ticket id, or a plausible amount: whole cells or `#<n>`
+   tokens.
+2. **Shapes.** A credit's `reason` can come from the ticket's text, as a close's
+   `resolution` already could. Every string parameter of a consequential tool can now
+   carry ticket text.
+3. **Grammar** (`planners/grammar_fuzz.py`).
+   - A membership opening, in one plan in five: a read mapped to one text field, giving a
+     list with a trusted structure and untrusted elements. It is marked hot, so `contains`
+     and `filter` prefer it.
+   - The tainted opening drops from one in two to two in five.
+   - The `Str` literal pool gains the codes.
+4. **NI-5.** The property's approver approves a stale hash or another run's id in two
+   examples in five. Then nothing may execute.
+
+**Tests.** `tests/test_generator_coverage.py`, four deterministic `find` searches, show each
+input is now generated: codes, ticket ids and amounts in text, ticket text in a credit
+reason, and `contains` over a membership list. All four fail on the old generators, which
+stay at base in the job because they are not under `tests/`.
+
+**Effect on recorded measurements.**
+- *Witnesses.* `check` replays one detection per required mutant. 20 of 21 still catch.
+  "re-check treats a relaxed verdict as stricter" (NI-5, shapes) no longer catches at seed
+  202616002, because NI-5 now draws an approver mode. Re-derived as the first rate seed
+  that catches within 1,000: 202616001, at example 589 (`mutant_rates.py one`, this
+  session).
+- *Witness indices.* All 20 witnesses were re-measured at their seeds
+  (`mutant_rates.py one`, one fresh process each). Every one catches, but most detect later
+  than before, for example call 562 instead of 86 for two grammar witnesses. The comments
+  on `WITNESSES` now give the new calls.
+- *Check time.* `check` went from 46.78 s to 121.12 s (both measured in this session). The
+  time is in the witness replays: the slowest is 10.12 s; the property tests take 1.6–3.1 s
+  each.
+- *k-seed designs.* q, k and n were estimated on the old generators. Stage d runs them at
+  fresh seeds on the new ones without re-estimating; any miss is reported, not tuned
+  (D-058).
+- *Held-out.* This change was designed knowing what the three missed mutants do, which is
+  the point of fixing their class. So they no longer count as held out. Their post-fix
+  result is stage d's `mutant-postfix-heldout` step, reported separately from the Gate 3
+  baseline. Held-out runs stay out of session (owner's memory rule), so none ran here.
+
+**Rejected.**
+- *One shape per missed mutant.* That tunes to the three mutants. The class fix changes
+  what every untrusted field and every consequential string parameter can hold.
+- *Making codes the majority of payloads.* Random and dangerous text still find the
+  labelling bugs the generator was built for. Codes are two of eight payload options.
