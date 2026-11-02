@@ -148,3 +148,23 @@ isolation fails. It does not
 show that labels alone are a practical defence.
 ([F-3](DECISIONS.md#f-3-finding-the-gullible-planners-triggers-are-fitted-to-the-dev-phrasing-owner-gate-2),
 [RESULTS](RESULTS.md#the-three-defences-side-by-side))
+
+## A CI fuzz run that repeated the same examples twenty times
+
+The first fuzz of the six non-interference properties at v1.0 (GitHub Actions run 41429151228)
+passed every chunk, and none of it counts. On a CI runner, Hypothesis 6.170.13 loads its own
+`ci` profile, which sets `derandomize=True`. The project's `fuzz` profile did not set
+`derandomize`, so it inherited `True` and ignored each chunk's seed. Every chunk of a property
+ran the same 1,000 examples: 20,000 reported examples were really 1,000.
+
+Nothing failed, so no check flagged it. It was caught by reading the per-chunk statistics:
+all 20 chunks of each property reported identical counts, for example 1,000 passing and 29
+invalid in every single-run shape chunk. Chunks with different seeds should not agree like that.
+
+The rerun (run 41430446343) unset the CI variables and first checked that the loaded `fuzz`
+profile had `derandomize=False`; all six jobs printed it. The chunks' statistics then differed
+(13 to 18 distinct invalid counts per property), and all 120,000 examples passed. Earlier large
+fuzz runs were local and the mutant measurements fix their own seeds, so neither was affected.
+The profile fix and a test that fails if the `fuzz` profile is ever derandomized are
+[issue #52](https://github.com/mankitraj915/warrant/issues/52).
+([Fuzz at v1.0](DECISIONS.md#fuzz-of-all-six-ni-properties-at-v10-github-actions-run-41430446343-verified-2026-11-02-issue-49))
