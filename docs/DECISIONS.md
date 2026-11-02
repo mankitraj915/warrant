@@ -3003,3 +3003,42 @@ row under that id. The id stays spent either way.
 
 All three fail on 17c4760: an empty `actions` list in the failed row, and no audit row at all
 for the other two.
+
+## D-073 What the base-fail job judges, and what it only lists (2026-11-02; re-review #4-#6, issue #35)
+
+**Problem.**
+- *#4:* all new regression tests ran in one pytest call on base. One module that failed to
+  collect interrupted the session, every id became "not collected", and "not collected"
+  counted as failing, so a test that passes on base was accepted alongside it.
+- *#5:* a `harness_gap` test was run on base only under its mutant, and the mutant could be
+  one the same PR defines; nothing checked the test unmutated.
+- *#6:* tests changed in place were never mentioned. Locally, an uncommitted test file was
+  collected at HEAD but not copied to base, so it was "not collected" and accepted.
+
+**Decision.**
+- Each new test module runs on base in its own pytest process. A module that fails to collect
+  gives its tests `COLLECTION ERROR`, which still counts as failing on base (it is how a test
+  of a new module fails there), but the summary counts them separately, because their
+  assertions never ran on base. An id missing from a module that ran is `MISSING`, which fails
+  the job.
+- A `harness_gap` test must pass on base unmutated and fail under its mutant.
+- Listed for the PR reviewer, not judged: existing test functions whose source changed
+  (`CHANGED`), and mutants the change adds to `deterministic_mutants.py` (`NEW MUTANT`).
+  Whether an in-place change weakens a test, or whether a new mutant really reintroduces the
+  bug its test claims, needs a reader.
+- The script refuses to run (exit 2) while `tests/` has uncommitted changes.
+
+**Rejected.**
+- *Treating `COLLECTION ERROR` as not failing.* Every new module's tests would then need a
+  separate harness; a test of `kernel/runlock.py` cannot import it on a base that lacks it.
+- *Judging in-place changes by running the old and new versions.* A strengthened test and a
+  weakened one can both pass at HEAD and both fail or pass at base; the difference is in what
+  they assert, which a script cannot rank.
+
+**Regression tests.** `tests/test_base_fail_script.py` builds a small repository with a base
+commit and a change, and runs the script in this tree against it:
+- `test_a_module_that_fails_to_collect_on_base_does_not_hide_a_test_that_passes`;
+- `test_uncommitted_tests_are_refused`.
+
+Both fail with the script at 17c4760 (exit 0 where 1 and 2 are expected; checked by swapping
+the old script in, this session).
