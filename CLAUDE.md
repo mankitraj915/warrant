@@ -80,7 +80,8 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 - CI (D-060): `.github/workflows/check.yml` (every PR), `new-tests-fail-on-base.yml`
   (`scripts/new_tests_fail_on_base.py --base <commit>`, also runnable locally after committing;
   a `@pytest.mark.harness_gap("<mutant>")` test must instead fail on base under its mutant from
-  `tests/deterministic_mutants.py`, D-063), and the manual
+  `tests/deterministic_mutants.py`, D-063; it lists tests changed in place and new mutants, and
+  refuses uncommitted changes under `tests/`, D-073), and the manual
   `owner-stages.yml` (`gh workflow run owner-stages.yml -f stage=d`), which uploads results.
 - `eval-llm`: evaluation with the local model. Phase 4, not yet.
 - `report`: regenerate `docs/RESULTS.md`. Phase 5, not yet.
