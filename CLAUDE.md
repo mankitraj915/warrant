@@ -83,8 +83,10 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
   `tests/deterministic_mutants.py`, D-063; it lists tests changed in place and new mutants, and
   refuses uncommitted changes under `tests/`, D-073), and the manual
   `owner-stages.yml` (`gh workflow run owner-stages.yml -f stage=d`), which uploads results.
-- `eval-llm`: evaluation with the local model. Phase 4, not yet.
-- `report`: regenerate `docs/RESULTS.md`. Phase 5, not yet.
+- `eval-llm`: evaluation with a local model. Not in v1 (D-074): v1 ships without a
+  language-model planner; planned for v1.1, with no CI-only model job before then.
+- `report`: regenerate `docs/RESULTS.md`. Not in v1 (D-075): RESULTS is hand-written from the
+  run artifacts; planned for v1.1.
 - `demo`: scripted demonstration (`scripts/demo.py`): an outage bulk refund approved by hash
   and executed exactly, a stale approval that executes nothing, and an injected ticket that is
   blocked, each explained from its audit row. `tests/test_demo.py` keeps
@@ -129,7 +131,8 @@ GitHub Actions, never in session. Plan and progress (tick as done):
 4. [ ] Step 3 (stage d) on the fixed commit: check, k-seed at fresh seeds, post-fix held-out,
    evals and sweeps; update RESULTS (also drop "Claude Code session" wording there); [x]
    re-review and its fixes; tag gate-3 at the final commit.
-5. [ ] Step 4: v1 ships without a local LLM planner; optional CI-only small-model job.
+5. [x] Step 4: v1 ships without a local LLM planner (D-074; RESULTS says so); the optional
+   CI-only small-model job is skipped (owner, 2026-11-02). RESULTS stays hand-written (D-075).
 6. [ ] Step 5: [ ] README (drafted, uncommitted until stage d's numbers; `tests/test_doc_links.py`
    checks its links), [x] docs/WHAT_WENT_WRONG.md, [x] docs/adr/ (10), [x] docs/PROCESS.md,
    [x] docs/STUDY_GUIDE.md, [x] code trimming pass (no unreferenced names, markers or

@@ -174,7 +174,7 @@ iteration, even when there are none (Gate 2 review #2), so whether a later extra
 trusted is fixed by syntax (§3.3). Together these make state carried *within* a run harmless:
 its texts, their order and the number of calls are all covered. State carried *across* runs (a
 cache, reused KV state) is not covered by labels, so the contract still requires statelessness,
-and it is enforced only by review and, in Phase 4, by a test of the LLM adapter:
+and it is enforced by review and, for any model-backed extractor, by a test of its adapter:
 - **Stateless per call.** No shared context, cache, or KV state across calls, and no run-wide
   budgets.
 - **Bounded per call.** A deterministic per-call limit, in tokens rather than wall-clock time.
@@ -184,8 +184,9 @@ and it is enforced only by review and, in Phase 4, by a test of the LLM adapter:
   - lists are capped at `MAX_EXTRACT` (5);
   - exceptions and over-budget calls yield `[]`.
 
-Phase 4 adds a test that the LLM adapter's output for an input does not depend on the calls
-made before it. Output types narrow the channel but do not make values trusted.
+v1's extractor is rule-based and stateless by construction. A model-backed extractor (not in
+v1, D-074) must come with a test that its output for an input does not depend on the calls made
+before it. Output types narrow the channel but do not make values trusted.
 
 ### 3.1 Program-counter label
 

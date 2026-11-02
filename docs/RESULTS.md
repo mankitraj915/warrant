@@ -1,15 +1,20 @@
 # Results
 
-Hand-written for Gate 3. In Phase 5, `tasks.py report` will generate this file from the results
-JSON. Every number below comes from a command named in this file, run at the commit stated, and
+Written by hand from the run artifacts (a generator, `tasks.py report`, is planned for v1.1;
+D-075). Every number below comes from a command named in this file, run at the commit stated, and
 recorded in `docs/DECISIONS.md` (D-042, D-043, D-050 and D-052 to D-056).
 
 Warrant applies the principle behind CaMeL (Debenedetti et al., *Defeating Prompt Injections by
 Design*, arXiv:2503.18813): a planner that never sees untrusted data, with capabilities and
 information-flow labels on what it computes. The evaluation follows the style of AgentDojo
 (Debenedetti et al., NeurIPS 2024 Datasets and Benchmarks): user tasks crossed with injection
-tasks, and deterministic utility and security checks. No LLM is involved in any number here
-(Phase 4 adds one). No LLM judge is used anywhere.
+tasks, and deterministic utility and security checks. No LLM is involved in any number here,
+and no LLM judge is used anywhere.
+
+**v1 has no language-model planner** (D-074). The security claim does not depend on one: every
+security test and every number below runs with scripted planners and no model. What v1 does not
+measure is the utility of a real planner: how often a model writes a valid, correct plan, and
+at what cost in memory and time. That is planned for v1.1.
 
 ## What these results may and may not claim
 
@@ -95,8 +100,8 @@ tasks, and deterministic utility and security checks. No LLM is involved in any 
 - **Prompt delimiting is a plumbing check here, not an evaluation.** Both scripted planners
   ignore delimiters by construction. `delimited+gullible` equals `undefended+gullible`, and
   `delimited+attacker` equals `undefended+attacker`, pair for pair in both suites (checked on
-  every row: outcome, attack verdict, refunds, credits, closures). Delimiting is evaluated with
-  the local LLM in Phase 4.
+  every row: outcome, attack verdict, refunds, credits, closures). Evaluating delimiting needs
+  a model planner (v1.1, D-074).
 - **The holdout's gullible row mostly measures the scripted attacker** (F-3). With the gullible
   planner, the undefended baseline reaches 393/414 on dev but only 39/488 on the holdout. With
   the attacker-plan model it reaches 451/488 on the holdout. So holdout payloads hijack an
