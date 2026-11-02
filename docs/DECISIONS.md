@@ -3381,3 +3381,44 @@ because that would change the gate; issue #60 is for v1.1. Rejected: moving the 
 `conftest.py` (into `tests/determinism.py`, which the job keeps at base) only to get a green job.
 That would hide which file registers the profiles, and it would also change `settings.default`
 for `scripts/mutant_rates.py`.
+
+## History scan before going public (re-run of D-059, 2026-11-02; issue #65)
+
+The owner will make the repository public. Before that, the D-059 scan was re-run.
+
+**Scope.** Every object reachable from any ref after `git fetch --all --tags`: 113 commits across
+33 remote branches and 7 tags (before PR #64 was merged). The scan read every patch with its
+author, committer and message (`git log --all -p`), the annotated tag messages, every path ever
+added (128), and the largest blobs.
+
+**Patterns.**
+- Tokens and keys: `gh[pousr]_…`, `github_pat_…`, `AKIA…`, `sk-…`, `sk-ant-`, `xox[abp]-`, `AIza…`,
+  `hf_…`, `Bearer …`, and `-----BEGIN … PRIVATE KEY`.
+- Credential-like assignments: `password`, `secret`, `api_key` or `token` followed by `:` or `=`
+  and a value.
+- E-mail addresses, absolute local paths and user names, phone numbers and IP addresses.
+- File names: `.env`, keys, databases, logs, results, notebooks and model files.
+
+**Findings.**
+- **Secrets:** none. No token pattern and no credential assignment matched.
+- **Personal data:**
+  - The owner's name and e-mail appear in commit headers and in the LICENSE copyright line only.
+  - The other addresses are synthetic fixtures (`example.test`, `example.invalid`, `ex.test`,
+    `support.internal`).
+  - `9876543210` is synthetic ticket text in `evals/tasks/dev/__init__.py`.
+  - The only IP address is `127.0.0.1`, in the network-guard tests and notes.
+- **Local paths:** these are the same lines D-059 found: `C:\Users\<user>\…` worktree paths in
+  earlier versions of DECISIONS and CLAUDE.md. The current tree has none.
+- **Unintended files:** none. No path ever added is a database, log, results file, environment
+  file, key or model. The largest blobs are versions of `docs/DECISIONS.md` (about 220 KB).
+- **Build-tooling references** (the owner's open decision on the working records):
+  - files at HEAD: `CLAUDE.md`, `docs/DECISIONS.md`, `docs/SPEC.md`, five files in
+    `docs/reviews/`, and the first docstring line of `scripts/phase3_run.py`. The script was not
+    in the earlier list;
+  - commit messages: one names the tooling ("written by a subagent", in the holdout-suite
+    commit), and a few others name the file `CLAUDE.md`.
+
+**Decision: no history rewrite.** It is the same position as D-059: nothing secret is exposed, and
+removing the old paths or the commit-message wording needs a rewrite, which needs the owner's
+yes. The owner also chose the repository description and topics, and the README now opens with
+the summary, the headline table and the reproduce commands (#63).
