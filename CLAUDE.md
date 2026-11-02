@@ -88,18 +88,18 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 
 ## Current status
 
-Phase: **3 in progress** (Gate 2 approved 2026-10-30). Code on branch `phase3-wip`, not merged.
-Stage a of the owner run is verified (DECISIONS "Phase 3 owner run: stage a results"); its
-mutant step failed, diagnosed in D-056: mutant results depended on Hypothesis's harvested
-constants pool (process state), not on the example database. Fixed by pinning generation
-(`tests/determinism.py`), explicit seeds, and NI properties split by plan source.
+Phase: **3, closing Gate 3** (Gate 2 approved 2026-10-30). Everything is on `main` (repo
+github.com/mankitraj915/warrant, private). Work goes through one issue, branch and PR per
+change, merged with merge commits; CI runs `check` and the new-tests-fail-on-base job (D-060,
+D-063, D-066). History through stage c: DECISIONS D-056 to D-059 and "Gate 3 baseline" (every
+required mutant caught at its k-seed design; held-out 2 caught, 3 missed, permanent in RESULTS).
 
-Stages rates and b are verified (DECISIONS "stage b results"). Mutant detection is now k
-independent seeds per mutant (D-058, the owner's final redesign; no further iteration). RESULTS
-has its NI section.
-
-Stage c is verified and recorded as the Gate 3 baseline (DECISIONS "Gate 3 baseline"):
-every required mutant caught; held-out 2 caught, 3 missed (permanent entries in RESULTS).
+Gate 3 findings 1-9 are fixed (PRs #16-#24, D-061 to D-069) and generator coverage (#13) is
+merged (PR #25, D-070). Issues #10-#12 (held-out misses) stay open until stage d's post-fix
+held-out result. Stage d is issue #26: started as GitHub Actions run 41370326167 on main at
+13cd4d8 (`gh run view 41370326167`; artifact `stage-d-<sha>`); the re-review of the fixes was
+started at the same time. Local memory: the commit charge has reached 32 GB of 32.6 GB with
+other projects running; when a local run fails with "memory allocation failed", verify on CI.
 
 **Owner delegation (2026-11-02): ship v1 autonomously.** Needs the owner's explicit yes:
 (a) rewriting git history, (b) making the GitHub repo public, (c) weakening the invariant, a
@@ -109,13 +109,14 @@ the tools used to build the project, and never claim the owner wrote code or pro
 Memory-heavy runs (fuzz, k-seed, held-out, evals at scale, models) go to owner-run commands or
 GitHub Actions, never in session. Plan and progress (tick as done):
 1. [x] 1.1 Record stage c as the Gate 3 baseline.
-2. [ ] Step 2: history scan (report; a rewrite needs the owner); merge phase3-wip into main
+2. [x] Step 2: history scan (report; a rewrite needs the owner); merge phase3-wip into main
    --no-ff; annotated tags gate-0..gate-3; private GitHub repo; push; releases; labels; one
    issue per Gate 3 finding; PR template; Actions (check on PRs; tests-fail-on-base job;
-   manual owner-run-stages workflow); record runner memory and free-minute limits.
-3. [ ] Steps 1.2/1.3 as issue + branch + PR each (merge commits): findings 1-9 with
+   manual owner-run-stages workflow); record runner memory and free-minute limits. (gate-3
+   tag not yet created: it goes on the final Gate 3 commit, item 4.)
+3. [x] Steps 1.2/1.3 as issue + branch + PR each (merge commits): findings 1-9 with
    regression tests failing on 7da1652; generator coverage (domain-valid values in untrusted
-   fields); post-fix held-out result reported separately.
+   fields); post-fix held-out result reported separately (in stage d).
 4. [ ] Step 3 (stage d) on the fixed commit: check, k-seed at fresh seeds, post-fix held-out,
    evals and sweeps; update RESULTS; re-review; tag gate-3 at the final commit.
 5. [ ] Step 4: v1 ships without a local LLM planner; optional CI-only small-model job.
