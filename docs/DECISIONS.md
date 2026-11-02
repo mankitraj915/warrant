@@ -3250,3 +3250,22 @@ files as they were then.
 | 14 | Low: the cap sweep omits steering | **Fixed:** a steering column, from the final run's sweep. | RESULTS |
 | 15 | Low: stale comments (`kernel/declassify.py`, `kernel/execution.py`); `make demo` missing | **Makefile fixed.** **Kernel comments deferred to v1.1**, for the same reason as #10. | Makefile |
 | 16 | Low: padding and repetition; no LICENSE; version 0.0.0 | **Version set to 1.0.0** (`pyproject.toml`, `uv.lock`). **Not changed:** the CaMeL and AgentDojo credit appears in README and RESULTS on purpose, because each is an entry point and must credit them. The repeated holdout and leaked-context caveats stay, because each document is meant to be read alone. **LICENSE** is the owner's choice before publishing. | pyproject.toml, uv.lock |
+
+## v1 fix re-review: responses (2026-11-02; issue #46)
+
+A second fresh reviewer checked the fixes above against the files and against stage d's
+artifact at 9f2f0c3. It confirmed that every README number matches the run, and that no code
+under `kernel/`, `planners/`, `evals/`, `scripts/`, `tests/` or `domain/` changed since
+9f2f0c3. Its report is verbatim in `docs/reviews/V1_FIX_REVIEW.md`.
+
+| # | finding | response |
+|---|---|---|
+| 1 | Medium-High: leaked context does not mean "labels alone stop every attack". With the attacker-plan model, 255/414 dev and 290/488 holdout pairs were blocked outright; the rest went to the idealised approver. Steering also counts requests that became blocks. | **Fixed** in README, RESULTS and WHAT_WENT_WRONG. They give the blocked/approval split (counted from the eval JSON in this session), attribute the routed pairs to the simulated approver, and define steering as the harness computes it (`evals/harness.py`). The finding-13 response above was wrong; this replaces it. |
+| 2 | Medium: "cannot change what executes" ignores the approval path | **Fixed:** "cannot change which unapproved effects execute", and README says approval steering is measured, not prevented. |
+| 3 | Medium: the docs README links (reviews, DECISIONS, SPEC) still name the tooling, and this change adds more | **Not changed**, for the reason in the finding-3 response above. It is listed in the hand-off as a decision the owner must take before the repository is made public. |
+| 4 | Low: "20 mutants" counts mutant-generator designs | **Fixed:** 16 mutants, 20 designs. |
+| 5 | Low: "(about 6%)" reads as a share | **Fixed:** 2 of 4 seeds; estimated miss near 6%. |
+| 6 | Low: the Gate 3 held-out baseline comes from stage c, not stage d | **Fixed.** |
+| 7 | Low: "No reviewer saw the evaluation results" is false for the v1 reviewers | **Fixed:** "No gate reviewer". |
+| 8 | Low: RESULTS rows not labelled "planner isolated" | **Fixed:** the four rows are labelled. |
+| 9 | Low: `make phase3-run` cannot run without `--out` | **Fixed:** target removed; `phase3-run` needs `--out`, so it is run through `tasks.py` only. |

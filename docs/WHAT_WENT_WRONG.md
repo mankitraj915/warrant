@@ -136,13 +136,15 @@ suites, under both attacker models. That says less than it seems to:
 - **Gullible planner.** It obeys few holdout phrasings, so its holdout zero would have been
   low anyway.
 - **What actually stops the attacks.** Under leaked context the plan label taints every
-  literal, so almost every action needs approval. The simulated approver approves only the
-  intended set.
-- **The cost.** 93.6% of holdout pairs were steered to approval with the attacker-plan model,
-  and utility under attack fell to 8.8%. With a real human approver, the result would depend
-  on that human.
+  literal. With the attacker-plan model the kernel blocked 290 of 488 holdout pairs outright and
+  sent the other 198 for approval, where the simulated approver, which approves only the
+  intended set, refused every one.
+- **The cost.** 93.6% of holdout pairs were steered (their approval request differs from the
+  benign run's), and utility under attack fell to 8.8%. With a real human approver, the 198
+  would depend on that human.
 
-The zero shows that labels route everything to a person when isolation fails. It does not
+The zero shows that labels block or route to a person everything an attack plan does when
+isolation fails. It does not
 show that labels alone are a practical defence.
 ([F-3](DECISIONS.md#f-3-finding-the-gullible-planners-triggers-are-fitted-to-the-dev-phrasing-owner-gate-2),
 [RESULTS](RESULTS.md#the-three-defences-side-by-side))

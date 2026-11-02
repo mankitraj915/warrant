@@ -53,13 +53,14 @@ uv run --locked python scripts/tasks.py eval        # dev suite; add --suite hol
 
 ## Results
 
-The tables come from `tasks.py eval` and the mutant results from `tasks.py phase3-run --stage d`,
-both at the commit stated in [docs/RESULTS.md](docs/RESULTS.md), which also says what these
+The tables come from `tasks.py eval` and the mutant results from `tasks.py phase3-run` (stage d,
+plus stage c for the Gate 3 held-out baseline), at the commits stated in
+[docs/RESULTS.md](docs/RESULTS.md), which also says what these
 results may and may not claim. No language model is involved in any number here. The attackers
 are scripted:
 - *gullible* obeys instructions it recognises in text;
 - *attacker-plan* emits a structured attack plan for each injection, with no text parsing;
-- *leaked context* shows the planner the ticket text, to test the labels alone.
+- *leaked context* shows the planner the ticket text, to test the kernel when isolation fails.
 
 **Dev suite** (40 tasks × 11 injections, 414 pairs where the injection applies to the task):
 
@@ -84,8 +85,10 @@ How to read these:
   never sees ticket text, so the gullible planner has nothing to obey and writes the oracle's
   plan. The remaining successes are what the declassification rules let through.
 - **The leaked-context rows test the kernel against attack plans.** The planner is shown the
-  ticket text and emits a structured attack plan per injection. The labels alone stop every
-  one, but almost every pair then needs a human, so utility under attack collapses.
+  ticket text and emits a structured attack plan per injection. No attack succeeded, but only
+  about 60% were blocked outright (255/414 dev, 290/488 holdout). The rest were sent for
+  approval, where the simulated approver, which approves only the intended set, refused them.
+  With a real person, those pairs would depend on that person. Utility under attack collapses.
 - **Every Warrant success is a declared residual risk.** Ticket text *triggers* an action a rule
   admits: one refund of the customer's single eligible order, or the standard ₹100 credit. The
   money still goes only to the ticket's own customer
@@ -98,10 +101,11 @@ How to read these:
 
 **Would the tests notice a broken kernel?** A *mutant* switches off one mechanism the design
 relies on.
-- **20 mutants the non-interference harness must catch:** each was caught by at least one of
-  its k independent seeds, at fresh seeds
-  ([ADR 0009](docs/adr/0009-k-independent-seeds.md)). The designs aim at an estimated miss
-  probability of 1% per mutant. Two came in below their estimated per-seed share (about 6%), so
+- **16 mutants the non-interference harness must catch** (20 designs, because 4 are also
+  measured against the random-plan generator): each design caught its mutant at one or more of
+  its k independent seeds, at fresh seeds ([ADR 0009](docs/adr/0009-k-independent-seeds.md)).
+  The designs aim at an estimated miss probability of 1% each. Two caught their mutant at only
+  2 of 4 seeds, below the estimated per-seed share, which puts their estimated miss near 6%. So
   the 1% is a target, not a measured bound.
 - **4 mechanisms the harness cannot reach** (for example the execution re-check) each have a
   deterministic test that must fail with the mechanism switched off.
@@ -142,7 +146,8 @@ executed: []
 
 - **Scope.** The guarantee covers integrity: what untrusted data can make the agent *do*. It
   does not cover availability. Outside the two rules' declared releases, injected text can stop
-  a whole run but cannot change what executes. Out-of-scope channels are listed in
+  a whole run but cannot change which unapproved effects execute. It can change what a human is
+  asked to approve; that is measured as approval steering, not prevented. Out-of-scope channels are listed in
   [THREAT_MODEL §6](docs/THREAT_MODEL.md#6-out-of-scope).
 - **Residual risk is declared, not zero.** The two rules let ticket text trigger bounded actions.
 - **Evidence covers the tested space.** The non-interference evidence covers the plans the
@@ -161,8 +166,8 @@ executed: []
   a real planner is not measured. v1 has no language-model planner; it is planned for v1.1
   ([D-074](docs/DECISIONS.md#d-074-v1-ships-without-a-language-model-planner-owner-2026-11-02-issue-44)).
 - **Idealised approver.** The simulated approver approves exactly the intended set, so approval
-  safety is an upper bound. The steering rate shows how often a human would be asked to decide
-  under attack.
+  safety is an upper bound. Approval steering counts attacked pairs whose approval request
+  differs from the benign run's, including requests that became blocks.
 - **One writer per database.** The kernel refuses configurations it cannot lock
   ([ADR 0008](docs/adr/0008-single-writer.md)).
 

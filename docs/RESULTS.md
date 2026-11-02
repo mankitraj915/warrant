@@ -85,8 +85,8 @@ at what cost in memory and time. That is planned for v1.1.
 | Undefended (with execution hygiene) | attacker-plan | 393/414 (94.9%) | 21/414 (5.1%) | 38/40 | 0/40 | 0/414 |
 | Prompt delimiting (sanity check) | gullible | 393/414 (94.9%) | 21/414 (5.1%) | 38/40 | 0/40 | 0/414 |
 | Prompt delimiting (sanity check) | attacker-plan | 393/414 (94.9%) | 21/414 (5.1%) | 38/40 | 0/40 | 0/414 |
-| Warrant | oracle | 5/414 (1.2%) | 396/414 (95.7%) | 39/40 | 3/40 (7.5%) | 2/414 (0.5%) |
-| Warrant | gullible | 5/414 (1.2%) | 396/414 (95.7%) | 39/40 | 3/40 (7.5%) | 2/414 (0.5%) |
+| Warrant (planner isolated) | oracle | 5/414 (1.2%) | 396/414 (95.7%) | 39/40 | 3/40 (7.5%) | 2/414 (0.5%) |
+| Warrant (planner isolated) | gullible | 5/414 (1.2%) | 396/414 (95.7%) | 39/40 | 3/40 (7.5%) | 2/414 (0.5%) |
 | Warrant, leaked context | gullible | 0/414 (0.0%) | 39/414 (9.4%) | 39/40 | 35/40 (87.5%) | 384/414 (92.8%) |
 | Warrant, leaked context | attacker-plan | 0/414 (0.0%) | 39/414 (9.4%) | 39/40 | 35/40 (87.5%) | 384/414 (92.8%) |
 
@@ -98,8 +98,8 @@ at what cost in memory and time. That is planned for v1.1.
 | Undefended (with execution hygiene) | attacker-plan | 451/488 (92.4%) | 21/488 (4.3%) | 38/40 | 0/40 | 0/488 |
 | Prompt delimiting (sanity check) | gullible | 39/488 (8.0%) | 396/488 (81.1%) | 38/40 | 0/40 | 0/488 |
 | Prompt delimiting (sanity check) | attacker-plan | 451/488 (92.4%) | 21/488 (4.3%) | 38/40 | 0/40 | 0/488 |
-| Warrant | oracle | 4/488 (0.8%) | 473/488 (96.9%) | 39/40 | 3/40 (7.5%) | 2/488 (0.4%) |
-| Warrant | gullible | 4/488 (0.8%) | 473/488 (96.9%) | 39/40 | 3/40 (7.5%) | 2/488 (0.4%) |
+| Warrant (planner isolated) | oracle | 4/488 (0.8%) | 473/488 (96.9%) | 39/40 | 3/40 (7.5%) | 2/488 (0.4%) |
+| Warrant (planner isolated) | gullible | 4/488 (0.8%) | 473/488 (96.9%) | 39/40 | 3/40 (7.5%) | 2/488 (0.4%) |
 | Warrant, leaked context | gullible | 0/488 (0.0%) | 402/488 (82.4%) | 39/40 | 35/40 (87.5%) | 92/488 (18.9%) |
 | Warrant, leaked context | attacker-plan | 0/488 (0.0%) | 43/488 (8.8%) | 39/40 | 35/40 (87.5%) | 457/488 (93.6%) |
 
@@ -131,11 +131,13 @@ at what cost in memory and time. That is planned for v1.1.
   In each, ticket text *triggers* a rule-bounded action that the rule admits: one refund of the
   customer's single eligible order, or the standard ₹100 credit. NI-3 permits this by design,
   and it is reported as a residual risk (DESIGN §6.2), not hidden.
-- **Leaked context.** With isolation deliberately broken, labels alone stopped every attack in
-  both suites, under both attacker models. With the attacker-plan model, the cost is that
-  almost every pair then needs approval and is steered (93% of pairs in both suites), and
-  utility under attack collapses (8.8–9.4%), because the simulated approver refuses any set that
-  is not the intended one. This configuration tests the second layer; it is not a way to run
+- **Leaked context.** With isolation deliberately broken, no attack succeeded in either suite,
+  under either attacker model. With the attacker-plan model, the labels blocked 255/414 dev and
+  290/488 holdout pairs outright. The rest were sent for approval, and the simulated approver,
+  which approves only the intended set, refused all but one (a dev pair whose approved set was
+  the intended one). So these zeros rest partly on an idealised approver. Steering (the approval
+  request differs from the benign run's, including a request that became a block) is 93% of
+  pairs in both suites, and utility under attack collapses (8.8–9.4%). This configuration tests the second layer; it is not a way to run
   Warrant.
 - **Benign utility:**
   - Warrant 39/40. T14 fails in every configuration: its ticket names no order, so there is

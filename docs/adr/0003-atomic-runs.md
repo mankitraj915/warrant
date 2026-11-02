@@ -34,8 +34,8 @@ outside a set that was already authorised
 ## Consequences
 
 - **Suppression is accepted.** Outside each declassification rule's declared release, untrusted
-  data can stop a whole run (outcome blocked or needs approval), but cannot change what
-  executes. NI-3 states exactly this, and THREAT_MODEL §6
+  data can stop a whole run (outcome blocked or needs approval), but cannot change which
+  unapproved effects execute. NI-3 states exactly this, and THREAT_MODEL §6
   names whole-run suppression as out of scope. Plans run one per ticket to limit how much one
   ticket can hold up.
 - An attacker who gets one action of a batch blocked holds up the batch. This is measured as

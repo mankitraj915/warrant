@@ -14,7 +14,7 @@ outcome").
 Before each gate report, a separate reviewer received the threat model, the design and the code.
 At Gate 3 it also received the specification, the earlier reviews, and three extracts about the
 mutant evidence that the owner asked it to check (listed in DECISIONS, "Gate 3 independent
-review: responses"). No reviewer saw the evaluation results. Its job was to break the
+review: responses"). No gate reviewer saw the evaluation results. Its job was to break the
 invariant. Each report is kept verbatim in [docs/reviews/](reviews/), and every finding has a
 written response in DECISIONS: fixed, accepted with its cost stated, or disputed with reasons.
 Every review found real problems. At Gate 0, before any code, one property as first stated was
