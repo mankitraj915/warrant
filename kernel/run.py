@@ -80,6 +80,15 @@ class RunResult:
     answer_sinks: list[str] | None = None  # None: unrestricted
 
 
+@dataclass
+class _Progress:
+    """What a run has decided and done so far, for its audit row if an exception
+    escapes (Gate 3 fix re-review #2)."""
+
+    result: RunResult | None = None
+    done: list[Executed] = field(default_factory=list)
+
+
 def _origins(label: Label) -> list[str] | str:
     return STAR if STAR in label.untrusted else sorted(label.untrusted)
 
@@ -160,42 +169,47 @@ def _run_plan(
     planner_input_hash: str | None,
 ) -> RunResult:
     env.db.text_factory = lossless_text
-    recover(env.db, env.provider)
-    if env.db.execute("SELECT 1 FROM audit WHERE run_id = ?", (run_id,)).fetchone():
-        result = RunResult(run_id, "rejected", "run_id already used; run ids are single-use")
-    else:
-        audit = partial(_audit, raw_plan=raw_plan, task_id=task_id)
-        try:
+    audit = partial(_audit, raw_plan=raw_plan, task_id=task_id)
+    progress = _Progress()
+    try:
+        recover(env.db, env.provider)
+        if env.db.execute("SELECT 1 FROM audit WHERE run_id = ?", (run_id,)).fetchone():
+            result = RunResult(run_id, "rejected", "run_id already used; run ids are single-use")
+        else:
             result = _decide_and_execute(
-                raw_plan, env, run_id, plan_label, audit, planner_input_hash
+                raw_plan, env, run_id, plan_label, audit, planner_input_hash, progress
             )
-        except Exception as exc:
-            _audit_failure(env.db, run_id, exc, raw_plan, task_id, plan_label, planner_input_hash)
-            raise
+    except BaseException as exc:
+        failed = RunResult(
+            run_id, "failed", "", plan_label=plan_label, planner_input_hash=planner_input_hash
+        )
+        _audit_failure(env.db, progress.result or failed, exc, raw_plan, task_id, progress.done)
+        raise
     result = replace(result, planner_input_hash=planner_input_hash)
     return _audit(env.db, result, raw_plan, task_id)
 
 
 def _audit_failure(
     db: sqlite3.Connection,
-    run_id: str,
-    exc: Exception,
+    so_far: RunResult,
+    exc: BaseException,
     raw_plan: Any,
     task_id: str | None,
-    plan_label: Label,
-    planner_input_hash: str | None,
+    done: list[Executed],
 ) -> None:
-    """An exception escaped the run (an approver that raises, ``RecordLost``, a bug):
-    discard the unfinished step, reject a pending approval request, and write the
-    run's final audit row, so every run is audited and its id is spent (Gate 3 #7)."""
+    """An exception escaped the run (a planner or approver that raises, ``RecordLost``,
+    a recovery error, a bug): discard the unfinished step, reject a pending approval
+    request, and write the run's final audit row, so every run is audited and its id
+    (and task id) spent (Gate 3 #7). The row keeps what the run had decided and every
+    effect that completed (Gate 3 fix re-review #2, #3)."""
     db.rollback()
     db.execute(
         "UPDATE approvals SET status = 'rejected' WHERE run_id = ? AND status = 'requested'",
-        (run_id,),
+        (so_far.run_id,),
     )
     reason = f"{type(exc).__name__}: {exc}"
-    failed = RunResult(run_id, "failed", reason, plan_label=plan_label)
-    _audit(db, replace(failed, planner_input_hash=planner_input_hash), raw_plan, task_id)
+    failed = replace(so_far, outcome="failed", reason=reason, executed=tuple(done))
+    _audit(db, failed, raw_plan, task_id)
 
 
 def _decide_and_execute(
@@ -205,6 +219,7 @@ def _decide_and_execute(
     plan_label: Label,
     audit: Callable[..., RunResult],
     planner_input_hash: str | None,
+    progress: _Progress,
 ) -> RunResult:
     try:
         plan = parse_plan(raw_plan)
@@ -230,7 +245,9 @@ def _decide_and_execute(
         plan_label=plan_label,
         answer=None if isinstance(interpreter.answer, UnitV) else plain(interpreter.answer),
         answer_sinks=None if answer_label.sinks is None else sorted(answer_label.sinks),
+        planner_input_hash=planner_input_hash,
     )
+    progress.result = result
     blocked = [v.reason for v in verdicts if v.kind == "BLOCK"]
     if blocked:
         return replace(result, outcome="blocked", reason="; ".join(blocked))
@@ -238,6 +255,7 @@ def _decide_and_execute(
         request = canonical_set(run_id, actions, verdicts)
         hash_ = digest(request)
         result = replace(result, approval_request=request, approval_hash=hash_)
+        progress.result = result
         env.db.execute(
             "INSERT INTO approvals (run_id, hash, status) VALUES (?, ?, 'requested')",
             (run_id, hash_),
@@ -252,11 +270,12 @@ def _decide_and_execute(
         if problem is not None:
             return replace(result, outcome="approval_invalid", reason=problem)
         result = replace(result, approved=True)
+        progress.result = result
     # Write ahead: the decision (verdicts, rule decisions, approval) is durable
     # before any effect, so a crash cannot move money under an unlogged decision.
     decided = replace(result, outcome="executing", planner_input_hash=planner_input_hash)
     audit(env.db, decided, phase="decided")
-    outcome, done = execute(actions, verdicts, env.db, env.provider)
+    outcome, done = execute(actions, verdicts, env.db, env.provider, progress.done)
     return replace(result, outcome=outcome, reason=outcome, executed=tuple(done))
 
 
@@ -346,8 +365,20 @@ def _run_task(
             assert isinstance(body, Scalar)
             context.append((str(body.value), body.label))
     planner_input = PlannerInput(request, signatures(), tuple(context))
+    try:
+        raw_plan = planner.plan(planner_input)
+    except BaseException as exc:  # audited, and the task id spent (Gate 3 fix re-review #3)
+        failed = RunResult(
+            run_id,
+            "failed",
+            "",
+            plan_label=planner_input.label(),
+            planner_input_hash=planner_input.digest(),
+        )
+        _audit_failure(env.db, failed, exc, None, task_id, [])
+        raise
     return _run_plan(
-        planner.plan(planner_input),
+        raw_plan,
         env,
         run_id,
         planner_input.label(),
