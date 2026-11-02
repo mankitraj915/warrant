@@ -190,3 +190,7 @@ tasks, and deterministic utility and security checks. No language model is used 
 - [docs/STUDY_GUIDE.md](docs/STUDY_GUIDE.md): a reading order and 25 questions for a skeptical
   reader.
 - [docs/PROCESS.md](docs/PROCESS.md): how the work was organised.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
