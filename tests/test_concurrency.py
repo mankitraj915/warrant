@@ -8,23 +8,26 @@ row; the provider then committed, the record was lost, and the ownership rule
 admitted a second automatic refund of the same order.
 """
 
+import os
 import sqlite3
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
 
 from domain.payment_mock import PaymentMock
-from domain.seed import materialize
+from domain.seed import Ticket, World, materialize
 from kernel.run import Environment, run_plan
 from planners.builders import plan, refund_from_ticket_text
 from planners.fuzz import CASE_CUSTOMER, CASE_TICKET, _case_world, raw_extractor
 
 
 class ConcurrentRunDuringRefund(PaymentMock):
-    """While the first refund is in flight, another run starts on the same database
-    (the interleaving two processes sharing it would produce)."""
+    """While the first refund is in flight, another run starts on the same connection.
+    Other ways to reach the same data (a second connection, another name for the file)
+    are covered by the tests after ``test_run_lock_excludes_another_process``."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -154,3 +157,83 @@ def test_lost_record_fails_loudly_and_is_restored() -> None:
         "SELECT idempotency_key, provider_ref FROM refunds WHERE order_id = 7000"
     ).fetchall()
     assert rows == [("refund:7000:4000", "pay-1")]
+
+
+SECOND = 4002
+
+
+def _two_ticket_world() -> World:
+    world = _case_world(1, "in_transit").replace_text(
+        "tickets", CASE_TICKET, "body", "Refund #7000"
+    )
+    return world.extend(tickets=(Ticket(SECOND, CASE_CUSTOMER, "again", "Refund #7000"),))
+
+
+class SecondConnectionRuns(PaymentMock):
+    """While run A's refund is at the provider, run B starts on another connection to the
+    same data, for a second ticket of the same customer naming the same order (Gate 3
+    fix re-review #1)."""
+
+    def __init__(self, other: sqlite3.Connection) -> None:
+        super().__init__()
+        self.other = other
+        self.fired = False
+        self.refused: BaseException | None = None
+
+    def refund(self, idempotency_key: str, order_id: int, amount: int) -> str:
+        if not self.fired:
+            self.fired = True
+            try:
+                run_plan(
+                    refund_from_ticket_text(SECOND),
+                    Environment(self.other, self, raw_extractor),
+                    run_id="B",
+                )
+            except Exception as exc:  # refused, as it should be
+                self.refused = exc
+        return super().refund(idempotency_key, order_id, amount)
+
+
+def test_second_connection_to_a_shared_in_memory_database_is_refused() -> None:
+    """Two connections to one shared-cache in-memory database share one lock."""
+    uri = f"file:warrant-{uuid.uuid4().hex}?mode=memory&cache=shared"
+    first = sqlite3.connect(uri, uri=True)
+    materialize(_two_ticket_world()).backup(first)
+    provider = SecondConnectionRuns(sqlite3.connect(uri, uri=True))
+    result = run_plan(
+        refund_from_ticket_text(CASE_TICKET),
+        Environment(first, provider, raw_extractor),
+        run_id="A",
+    )
+    assert type(provider.refused).__name__ == "RunLocked"
+    assert result.outcome == "executed"
+    assert [(e.order_id, e.amount) for e in provider.effects] == [(7000, 120_000)]
+
+
+def test_hard_linked_database_is_refused(tmp_path: Path) -> None:
+    """A database file with a second name cannot be identified by one lock, so the
+    kernel refuses to run on it rather than lock one name."""
+    path, link = tmp_path / "shop.sqlite", tmp_path / "shop-link.sqlite"
+    materialize(_two_ticket_world(), path).close()
+    os.link(path, link)
+    for name in (path, link):
+        env = Environment(sqlite3.connect(name), PaymentMock(), raw_extractor)
+        with pytest.raises(Exception) as exc:
+            run_plan(refund_from_ticket_text(CASE_TICKET), env, run_id="r")
+        assert type(exc.value).__name__ == "UnlockableDatabase"
+        assert env.db.execute("SELECT count(*) FROM audit").fetchone() == (0,)
+        assert env.provider.effects == []  # type: ignore[attr-defined]
+
+
+def test_attached_database_is_refused(tmp_path: Path) -> None:
+    """Kernel tables reached through an attached database are not what the lock names,
+    so a connection with an attached database is refused."""
+    path = tmp_path / "shop.sqlite"
+    materialize(_two_ticket_world(), path).close()
+    conn = sqlite3.connect(":memory:")
+    conn.execute("ATTACH DATABASE ? AS shop", (str(path),))
+    env = Environment(conn, PaymentMock(), raw_extractor)
+    with pytest.raises(Exception) as exc:
+        run_plan(refund_from_ticket_text(CASE_TICKET), env, run_id="r")
+    assert type(exc.value).__name__ == "UnlockableDatabase"
+    assert env.provider.effects == []  # type: ignore[attr-defined]

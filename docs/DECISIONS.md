@@ -2907,3 +2907,60 @@ stay at base in the job because they are not under `tests/`.
   what every untrusted field and every consequential string parameter can hold.
 - *Making codes the majority of payloads.* Random and dangerous text still find the
   labelling bugs the generator was built for. Codes are two of eight payload options.
+
+## Gate 3 fix re-review: responses (2026-11-02)
+
+An independent reviewer re-read the threat model, the design and `kernel/`, and reviewed the
+Gate 3 fixes (14b9c26..08c24cb). Report verbatim: `docs/reviews/GATE3_FIX_REVIEW.md`.
+
+| # | finding | severity | response |
+|---|---|---|---|
+| 1 | The run lock is keyed by connection or file name; a shared-cache in-memory database, a hard-linked file or an attached database lets two runs pay one order twice | medium | **Real.** The lock now names the database: a lock row inside an in-memory database; hard-linked files and attached databases refused (D-071, issue #33). The overclaiming test docstring is corrected. |
+| 2 | A failed run's final row records no actions and no executed effects, even when money moved | low | **Real.** The failed row carries the decided actions and the effects that completed before the exception (D-072, issue #34). |
+| 3 | Exceptions from the planner or from `recover()` leave no audit row, so the task id can be planned again | low | **Real.** Both move inside the audited region (D-072, issue #34). |
+| 4 | One new test module failing to collect on base marks every new test "not collected", which counts as failing | medium | **Real.** Judge each new test module in its own pytest process; report import-only failures as such (D-073, issue #35). |
+| 5 | A `harness_gap` test is judged only under a mutant the same PR may define | low | **Real.** The script reports mutants the PR adds or changes, and requires a gap test to pass unmutated on base (D-073, issue #35). |
+| 6 | Tests changed in place are never judged | low | **Real, partly addressed.** The script lists test functions whose bodies changed, for the PR reviewer; it cannot judge whether a change weakens a test (D-073, issue #35). |
+
+The reviewer also noted that no test pins the lock being held through the final audit row.
+The code holds it (`run_plan` and `run_task` wrap the whole run). A pin test would pass on
+base, and no deterministic mutant expresses "release early" without rewriting the entry
+points, so none is added. This is recorded as untested.
+
+## D-071 The run lock names the database, not the connection (2026-11-02; re-review #1, issue #33)
+
+**Problem.** `run_lock` keyed an in-memory database by connection object and a file database
+by the name it was opened with, and took no cross-process lock for an in-memory main. Three
+configurations gave two runs on the same data different keys:
+- two connections to one shared-cache in-memory database;
+- two hard-linked names of one file;
+- kernel tables in a database attached to a `:memory:` main.
+
+In each, the reviewer's probe paid order 7000 twice (120,000 paid, 240,000 refunded), both
+refunds admitted by `ticket_order_ownership`.
+
+**Decision.**
+- *In-memory main:* the lock is a row in a `run_lock` table inside the database, inserted and
+  committed before `recover()`, deleted after the final audit row. Every connection to a
+  shared in-memory database sees it. A crash cannot leave it stale, since the memory dies
+  with the process. A refused attempt rolls back only a transaction it opened.
+- *File main:* locked by `normcase(realpath(path))` (registry and side file). A file with
+  `st_nlink > 1` raises `UnlockableDatabase` before anything is touched.
+- *Attached databases:* any database besides `main` and `temp` raises `UnlockableDatabase`.
+
+**Rejected.**
+- *A lock row in file databases too.* A crash would leave it held: the lease problem D-061
+  rejected.
+- *Locking on the file's device and inode.* A side-file name derived from an inode is not
+  portable to Windows path semantics, and hard-linked databases have no use here; refusing
+  them is simpler and testable.
+- *Qualifying every kernel table as `main.`.* It fixes (c) only, and an attached database
+  would still be a second route to data the lock does not cover.
+
+**Regression tests.** `tests/test_concurrency.py`:
+- `test_second_connection_to_a_shared_in_memory_database_is_refused`;
+- `test_hard_linked_database_is_refused`;
+- `test_attached_database_is_refused`.
+
+All three fail on 43b1d02 behaviourally: no `RunLocked`, or "DID NOT RAISE". They check
+outcomes by exception name, so they collect on base.

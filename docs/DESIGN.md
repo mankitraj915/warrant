@@ -797,11 +797,19 @@ BLOCKed by the policy (P3), and the record is written before money moves (Gate 1
   (`kernel/runlock.py`) before `recover()`, and hold it until the final audit row is written.
 - A run that finds the lock held raises `RunLocked`. It writes nothing, and its run id stays
   unused.
-- How the lock works:
-  - Within a process, the lock is a registry of held databases.
-  - Across processes, it is an exclusive SQLite transaction on `<database>.runlock`.
-  - The operating system releases that transaction when the holder dies, so a crash leaves
-    no stale lock.
+- How the lock works. It names the database the kernel writes, not the connection or the
+  file name used to reach it (Gate 3 fix re-review #1, D-071):
+  - A file database is locked by its resolved path: within a process, a registry of held
+    paths; across processes, an exclusive SQLite transaction on `<database>.runlock`. The
+    operating system releases that transaction when the holder dies, so a crash leaves no
+    stale lock.
+  - A file with more than one hard link has more than one path, so the kernel refuses it
+    (`UnlockableDatabase`, touching nothing).
+  - An in-memory database may be shared between connections, so its lock is a row in the
+    database itself (`run_lock`), which every connection to it sees. A crash cannot leave it
+    stale, because the memory goes with the process.
+  - A connection with any database attached besides `main` and `temp` is refused, because the
+    kernel's tables could then live in a database the lock does not name.
 - Kernel runs are the only writers of `refunds`, `credits`, `approvals`, `audit` and ticket
   status. Other parties may add tickets, orders and customers concurrently; their existence
   is already attacker-influenced (§2.1).
@@ -812,7 +820,8 @@ BLOCKed by the policy (P3), and the record is written before money moves (Gate 1
   raises `RecordLost`. It never reports a clean execution. Under the lock, only a writer
   outside the kernel can cause this.
 - Tests: `tests/test_concurrency.py` (the reviewer's probe, re-entry, a second process, a lost
-  record).
+  record, a second connection to a shared in-memory database, a hard-linked file, an attached
+  database).
 
 ## 11. Persistence (storage label rule)
 
