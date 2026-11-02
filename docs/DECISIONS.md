@@ -3269,3 +3269,20 @@ under `kernel/`, `planners/`, `evals/`, `scripts/`, `tests/` or `domain/` change
 | 7 | Low: "No reviewer saw the evaluation results" is false for the v1 reviewers | **Fixed:** "No gate reviewer". |
 | 8 | Low: RESULTS rows not labelled "planner isolated" | **Fixed:** the four rows are labelled. |
 | 9 | Low: `make phase3-run` cannot run without `--out` | **Fixed:** target removed; `phase3-run` needs `--out`, so it is run through `tasks.py` only. |
+
+## v1 release (2026-11-02; issue #46)
+
+**Fresh-clone reproduction following only the README** (this session, on the 8 GB Windows
+laptop): a new clone of 341ad19, whose code and README are v1.0's, then the README's three
+commands plus the demo it names.
+- `uv sync --locked`: exit 0.
+- `tasks.py check`: exit 0, "284 passed in 136.31s".
+- `tasks.py eval` and `eval --suite holdout`: exit 0; every table identical to stage d's logs at
+  9f2f0c3 (run 41386725959), apart from output paths; PII canary 0 hits in both.
+- `tasks.py demo`: exit 0, identical to `docs/demo_transcript.txt` apart from the echoed command
+  line and line endings.
+
+**Tags.** `gate-3` is on 9f2f0c3, the measured commit. `v1.0` is on the merge commit of PR #48.
+Between them only documentation, the Makefile and the package version change; `kernel/`,
+`planners/`, `evals/`, `scripts/`, `tests/` and `domain/` are identical
+(`git diff --stat gate-3 v1.0 -- kernel planners evals scripts tests domain` is empty).
