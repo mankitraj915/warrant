@@ -63,8 +63,19 @@ jobs:
               "python": platform.python_version(),
           }, indent=1))
           EOF
+      # Hypothesis loads its own "ci" profile (derandomize=True) when CI or GITHUB_ACTIONS
+      # is set, and the fuzz profile inherits it, so every chunk would run the same
+      # examples whatever its seed (first attempt, run 41429151228). Unset both, and
+      # refuse to fuzz unless the profile is randomized.
+      - name: Check the fuzz profile is randomized
+        run: >
+          env -u CI -u GITHUB_ACTIONS HYPOTHESIS_PROFILE=fuzz uv run --locked python -c
+          "import tests.conftest; from hypothesis import settings;
+          assert settings.default.derandomize is False, settings.default;
+          print('derandomize:', settings.default.derandomize)"
       - name: Fuzz ${{ matrix.name }}
         run: >
+          env -u CI -u GITHUB_ACTIONS
           uv run --locked python scripts/fuzz_chunks.py
           --test "${{ matrix.test }}" --base-seed ${{ matrix.seed }}
           --chunks 20 --examples 1000
