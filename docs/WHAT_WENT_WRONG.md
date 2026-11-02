@@ -12,7 +12,7 @@ real bugs in that same code:
 - two ways extraction under untrusted control could launder labels;
 - trusted actions on a second ticket of the case customer.
 
-The fuzzer could not have found any of them, because its hand-written plan shapes never
+The fuzzer could not have found any of them, because its fixed plan shapes never
 produced those plans. A passing fuzz run is evidence about the shapes it samples and nothing
 more. That led to new shapes, a grammar-based plan generator, and mutant tests that require
 the harness to fail on a deliberately broken kernel.
@@ -91,7 +91,7 @@ DESIGN §10 and THREAT_MODEL §6.
 ## A held-out mutant no generator could reach
 
 At Gate 3, a reviewer who saw only the design and the kernel wrote five new mutants. The fuzzer
-missed three of them at every design, 108,462 examples each. One of these was approval
+missed three of them at every design, 102,000 examples each. One of these was approval
 consumption that ignores the approved hash:
 - The approval-binding property's approver always answered with the right hash for the right
   run.
@@ -99,10 +99,12 @@ consumption that ignores the approved hash:
   to the property, however long it ran.
 - Unit tests covered replay and cross-run use, but the property could not.
 
-The other two misses had the same root: untrusted text was always random, never a valid reason
-code or an existing id. The generators now draw domain-valid untrusted values, and the approver
-sometimes answers with a stale hash or another run's id. The three misses stay in RESULTS as
-permanent entries; their post-fix results are reported separately.
+The fix changed the generators: untrusted text can now be a valid reason code or an existing
+id, the grammar can build a trusted list of untrusted elements, and the approver sometimes
+answers with a stale hash or another run's id. Afterwards the approval mutant was caught at
+the first seed. The other two were still missed in 102,000 examples, so the cause given for them
+was not sufficient. No deterministic test covers either mechanism. They are open, and the three
+Gate 3 misses stay in RESULTS as permanent entries.
 ([D-057](DECISIONS.md#d-057-held-out-mutants-at-gate-3-owner-2026-10-31),
 [Gate 3 baseline](DECISIONS.md#gate-3-baseline-stage-c-results-commit-7da1652-verified-2026-11-02),
 [D-070](DECISIONS.md#d-070-generator-coverage-domain-valid-untrusted-values-2026-11-02-issue-13-step-13))

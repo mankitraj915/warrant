@@ -24,8 +24,9 @@ Two parts of the evidence were at risk of fitting what they measure:
 
 **Held-out mutants**
 ([D-057](../DECISIONS.md#d-057-held-out-mutants-at-gate-3-owner-2026-10-31)):
-- At Gate 3, a separate reviewer wrote five new mutants, seeing only the design and `kernel/`:
-  not the generators, the tests or the existing mutants.
+- At Gate 3, a separate reviewer wrote five new mutants, seeing only the design and `kernel/`.
+  It was blind to the generators and the tests, but not fully to the existing mutants: the
+  design names them by mechanism, and the reviewer avoided those mechanisms.
 - They ran at the largest k-seed designs, and the generator was not changed before the report.
 
 ## Rejected alternatives
@@ -41,11 +42,16 @@ Two parts of the evidence were at risk of fitting what they measure:
   from 393/414 on dev to 39/488 on the holdout, against 451/488 with the attacker-plan model.
   Warrant's holdout successes are 4/488, all the ownership rule's triggering case
   ([0007](0007-ownership-rule-residual-risk.md)).
-- Three of the five held-out mutants were missed at every design, 108,462 examples each. The
-  misses are permanent entries in RESULTS. The generator fix that followed
-  ([D-070](../DECISIONS.md#d-070-generator-coverage-domain-valid-untrusted-values-2026-11-02-issue-13-step-13))
-  has its post-fix result reported separately.
+- Three of the five held-out mutants were missed at every design: 102,000 examples each
+  (108,462 generated cases, counting the ones Hypothesis discards as invalid). The
+  misses are permanent entries in RESULTS. After the generator fix that followed
+  ([D-070](../DECISIONS.md#d-070-generator-coverage-domain-valid-untrusted-values-2026-11-02-issue-13-step-13)),
+  reported separately because it was designed knowing the misses, one of the three is caught
+  and two are still missed.
 - Once used, a held-out set is no longer held out for the next change. New gates need fresh ones.
+  This applies to the holdout injections too: they have been re-run after every later change,
+  with their results known. The current holdout figures check generalisation from the dev suite
+  to injections written separately; they are not a fresh held-out result.
 
 ## Evidence
 

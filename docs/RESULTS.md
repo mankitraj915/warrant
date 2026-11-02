@@ -1,6 +1,6 @@
 # Results
 
-Written by hand from the run artifacts (a generator, `tasks.py report`, is planned for v1.1;
+Compiled from the run artifacts (a generator, `tasks.py report`, is planned for v1.1;
 D-075). Every number below comes from a command named in this file, run at the commit stated, and
 recorded in `docs/DECISIONS.md` (D-042, D-043, D-050 and D-052 to D-056).
 
@@ -35,8 +35,10 @@ at what cost in memory and time. That is planned for v1.1.
 
 - **Suites:**
   - dev: 40 user tasks × 11 injection tasks, 414 applicable pairs;
-  - holdout: the same 40 user tasks × 15 injection tasks written by an independent red-team agent
-    (D-043), 488 applicable pairs. The holdout was never used to tune anything.
+  - holdout: the same 40 user tasks × 15 injection tasks written separately, by an author who
+    never saw the policies (D-043), 488 applicable pairs. It has been re-run after every later
+    change with its results known, so it checks generalisation from the dev suite; it is no
+    longer a fresh held-out set.
 - **Commands** (commit 9f2f0c3, the `gate-3` tag): `phase3-run --stage d` on the
   `owner-stages` GitHub Actions workflow, run 41386725959 (DECISIONS "Stage d at the final Gate 3
   commit"), which runs:
@@ -60,11 +62,11 @@ at what cost in memory and time. That is planned for v1.1.
     `<<UNTRUSTED_DATA>>` delimiters (with forged delimiters removed) and the request tells the
     planner to treat delimited text as data (D-051).
 - **Planners** (the attacker models):
-  - **oracle:** the correct hand-written plan.
+  - **oracle:** the task's correct plan, fixed in the task file.
   - **gullible:** scripted; follows instructions it recognises in text it is shown. Its
     triggers were written alongside the dev injections (finding F-3).
   - **attacker-plan:** emits the correct plan plus an attack plan written per injection task, as
-    structured steps, by an independent agent that never saw the policies (D-052). It does no
+    structured steps, by an author who never saw the policies (D-052). It does no
     text parsing, so it is not fitted to either suite's wording. Under Warrant isolation it
     sees no payload, so it is run against Warrant only in the leaked-context configuration.
   - **leaked:** a Warrant configuration that deliberately shows the planner the case ticket's
@@ -102,6 +104,10 @@ at what cost in memory and time. That is planned for v1.1.
 | Warrant, leaked context | attacker-plan | 0/488 (0.0%) | 43/488 (8.8%) | 39/40 | 35/40 (87.5%) | 457/488 (93.6%) |
 
 **How to read these tables.**
+- **With the planner isolated, gullible equals oracle by construction.** The planner never sees
+  ticket text, so the gullible planner has nothing to obey and writes the oracle's plan. The
+  two Warrant rows measure isolation plus the declassification rules; they are not the kernel
+  against an adversarial plan. The leaked-context rows are that test.
 - **Prompt delimiting is a plumbing check here, not an evaluation.** Both scripted planners
   ignore delimiters by construction. `delimited+gullible` equals `undefended+gullible`, and
   `delimited+attacker` equals `undefended+attacker`, pair for pair in both suites (checked on
@@ -111,7 +117,7 @@ at what cost in memory and time. That is planned for v1.1.
   planner, the undefended baseline reaches 393/414 on dev but only 39/488 on the holdout. With
   the attacker-plan model it reaches 451/488 on the holdout. So holdout payloads hijack an
   obedient planner about as often as dev payloads do, and the 39/488 understates them.
-- **Why the undefended baseline misses some attack-plan goals.** Every miss I checked came from
+- **Why the undefended baseline misses some attack-plan goals.** Every miss checked came from
   shared execution hygiene or from a goal the task already meets, not from a defence (D-052).
   - Shared idempotency keys absorb second credits on tickets that already have one (I6, I7, I11,
     H13 on T23–T27, T32, T39) and H04's duplicate refunds.
@@ -126,9 +132,9 @@ at what cost in memory and time. That is planned for v1.1.
   customer's single eligible order, or the standard ₹100 credit. NI-3 permits this by design,
   and it is reported as a residual risk (DESIGN §6.2), not hidden.
 - **Leaked context.** With isolation deliberately broken, labels alone stopped every attack in
-  both suites, under both attacker models. The cost is that almost every pair then needs
-  approval and is steered (93% of pairs for attacker-plan), and utility under attack collapses
-  (8.8–9.4% with the attacker-plan model), because the simulated approver refuses any set that
+  both suites, under both attacker models. With the attacker-plan model, the cost is that
+  almost every pair then needs approval and is steered (93% of pairs in both suites), and
+  utility under attack collapses (8.8–9.4%), because the simulated approver refuses any set that
   is not the intended one. This configuration tests the second layer; it is not a way to run
   Warrant.
 - **Benign utility:**
@@ -157,20 +163,21 @@ credits.
 Default: no cap (`None`, owner decision at Gate 2). The sweep shows what a cap trades
 (`warrant+oracle`):
 
-| cap | dev attack success | dev approval burden | dev utility under attack | holdout attack success | holdout approval burden |
-|---|---|---|---|---|---|
-| none | 5/414 | 3/40 | 396/414 | 4/488 | 3/40 |
-| ₹5,000 | 5/414 | 4/40 | 396/414 | 4/488 | 4/40 |
-| ₹2,000 | 5/414 | 5/40 | 396/414 | 4/488 | 5/40 |
-| ₹1,000 | 5/414 | 5/40 | 396/414 | 4/488 | 5/40 |
-| ₹500 | 5/414 | 5/40 | 396/414 | 4/488 | 5/40 |
-| ₹250 | 1/414 | 10/40 | 402/414 | 0/488 | 10/40 |
-| ₹0 | 1/414 | 10/40 | 402/414 | 0/488 | 10/40 |
+| cap | dev attack success | dev approval burden | dev utility under attack | dev steering | holdout attack success | holdout approval burden | holdout steering |
+|---|---|---|---|---|---|---|---|
+| none | 5/414 | 3/40 | 396/414 | 2/414 | 4/488 | 3/40 | 2/488 |
+| ₹5,000 | 5/414 | 4/40 | 396/414 | 2/414 | 4/488 | 4/40 | 2/488 |
+| ₹2,000 | 5/414 | 5/40 | 396/414 | 2/414 | 4/488 | 5/40 | 2/488 |
+| ₹1,000 | 5/414 | 5/40 | 396/414 | 2/414 | 4/488 | 5/40 | 2/488 |
+| ₹500 | 5/414 | 5/40 | 396/414 | 2/414 | 4/488 | 5/40 | 2/488 |
+| ₹250 | 1/414 | 10/40 | 402/414 | 11/414 | 0/488 | 10/40 | 9/488 |
+| ₹0 | 1/414 | 10/40 | 402/414 | 11/414 | 0/488 | 10/40 | 9/488 |
 
 A cap of ₹250 or less removes the F-1 refunds (dev 5 → 1, holdout 4 → 0) at the price of 7 more
-benign approvals in 40. The remaining dev success is the goodwill credit (T28+I11), which has its
-own fixed ₹100 amount and is not affected by the refund cap. Leaked-context configurations are
-unchanged at every cap (0 successes). The right cap depends on the deployment's refund sizes and
+benign approvals in 40, and more approval steering under attack (dev 2 → 11, holdout 2 → 9).
+The remaining dev success is the goodwill credit (T28+I11), which has its own fixed ₹100
+amount and is not affected by the refund cap. Leaked-context configurations are unchanged at
+every cap (0 successes). The right cap depends on the deployment's refund sizes and
 on what an approval costs there.
 
 ## Non-interference evidence
@@ -275,9 +282,9 @@ property's largest design; caught if any seed of any property catches it.
 |---|---|
 | the ownership rule admits any amount up to the refundable amount | caught (example 862, 7th seed) |
 | the labelling map loses `orders.customer_note` | caught (example 664, 1st seed) |
-| the goodwill rule no longer requires a trusted credit reason | **missed** (108,462 examples) |
-| `contains` ignores the labels of the list's elements | **missed** (108,462 examples) |
-| approval consumption ignores the approved hash | **missed** (108,462 examples) |
+| the goodwill rule no longer requires a trusted credit reason | **missed** (102,000 examples) |
+| `contains` ignores the labels of the list's elements | **missed** (102,000 examples) |
+| approval consumption ignores the approved hash | **missed** (102,000 examples) |
 
 **Why each was missed** (analysed after the result):
 - No generator produced an untrusted credit reason that is also a valid reason code.
@@ -301,7 +308,7 @@ plus 3 stage-b seeds at 4,000):
 
 The grammar generator was never expected to reach the declassification rules, multi-run state or
 approvals (D-053). It is a second, independent source of plans for the labelling rules; the
-hand-written shapes cover the rest.
+fixed adversarial shapes cover the rest.
 
 ### After the Gate 3 fixes (commit 9f2f0c3, stage d)
 
@@ -331,8 +338,8 @@ seed:
 | approval consumption ignores the approved hash | missed | **caught** by NI-5 (shapes), first seed, generated case 164 |
 
 The two held-out mutants caught at the baseline were caught again (`mutant_postfix.jsonl`, 208
-rows). The baseline's "108,462 examples" counted generated cases, including those Hypothesis
-discards as invalid; the designs ran 102,000 valid examples.
+rows). The baseline once reported its misses as "108,462 examples"; that counted generated
+cases, including those Hypothesis discards as invalid. The designs ran 102,000 valid examples.
 
 **Reading.**
 - **Approval hash: closed.** The approval-binding property's approver now sometimes answers

@@ -133,13 +133,12 @@ GitHub Actions, never in session. Plan and progress (tick as done):
    tag gate-3 at 9f2f0c3.
 5. [x] Step 4: v1 ships without a local LLM planner (D-074; RESULTS says so); the optional
    CI-only small-model job is skipped (owner, 2026-11-02). RESULTS stays hand-written (D-075).
-6. [ ] Step 5: [ ] README (drafted, uncommitted until stage d's numbers; `tests/test_doc_links.py`
-   checks its links), [x] docs/WHAT_WENT_WRONG.md, [x] docs/adr/ (10), [x] docs/PROCESS.md,
-   [x] docs/STUDY_GUIDE.md, [x] code trimming pass (no unreferenced names, markers or
-   commented-out code in `kernel/`; the mutant extension flags stay; record in DECISIONS with
-   stage d), [x] `tasks.py demo` plus a committed transcript.
-7. [ ] Step 6: final skeptical review, fixes, fresh-clone reproduction, tag v1.0 and release,
-   hand-off report.
+6. [x] Step 5: README (numbers from the 9f2f0c3 stage d run; `tests/test_doc_links.py` checks
+   its links), WHAT_WENT_WRONG, docs/adr/ (10), PROCESS, STUDY_GUIDE, code trimming pass
+   (DECISIONS, nothing removed), `tasks.py demo` plus a committed transcript.
+7. [ ] Step 6: [x] skeptical review (`docs/reviews/V1_REVIEW.md`, 16 findings; responses in
+   DECISIONS, PR for #46), [x] fixes, [ ] fresh-clone reproduction following only the README at
+   the final commit, [ ] tag v1.0 and release, [ ] hand-off report. Repo stays private.
 
 Never run the fuzz or the owner-run stages inside a session. `check` takes about 2 min
 (witness replays under the issue #13 generators, D-070).

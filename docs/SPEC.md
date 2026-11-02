@@ -1,5 +1,11 @@
 # Warrant: Specification
 
+> **v1 scope.** v1 implements Phases 0–3 and the Phase 5 README, demo and reproduction. It does
+> not include Phase 4 (the language-model planner, `get_model.sh`, `eval-llm`) or `tasks.py
+> report`; both are planned for v1.1
+> ([D-074](DECISIONS.md#d-074-v1-ships-without-a-language-model-planner-owner-2026-11-02-issue-44),
+> [D-075](DECISIONS.md#d-075-results-stays-hand-written-in-v1-2026-11-02-issue-44)).
+
 This document defines what to build, how to verify it, and what the results may claim. `CLAUDE.md` holds the working rules. Where the two seem to conflict, raise it with the owner rather than guessing.
 
 If anything here is wrong, underspecified, or internally inconsistent, say so in Phase 0. Challenging the spec early is more useful than faithfully implementing a flaw.

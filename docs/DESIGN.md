@@ -697,7 +697,7 @@ exception in either run fails the test.
 
 ### 9.4 Harness
 
-- Plans come from two generators (`planners.fuzz.plans(world, source)`): hand-written shapes
+- Plans come from two generators (`planners.fuzz.plans(world, source)`): fixed adversarial shapes
   (Gate 2 review #3) and a grammar-based generator (`planners.grammar_fuzz`, Phase 3, D-053).
   Each NI property (single-run, multi-run, NI-5) runs once per generator, as separate tests
   with separate budgets, so grammar plans never take examples from the shapes (D-056).

@@ -3221,3 +3221,32 @@ harness notices (`tests/test_ni_mutants.py`, `tests/deterministic_mutants.py`). 
 would remove the mutant evidence in RESULTS. Each is commented where it is defined.
 
 **Result.** Nothing removed. The kernel code is unchanged by this pass.
+
+## v1 skeptical review: responses (2026-11-02; issue #46)
+
+**The reviewer.** A fresh reviewer asked to read the repository as a skeptical hiring panel would:
+overclaiming, padding, inconsistent numbers, broken reproduction steps, and any claim about how
+the project was built. It read the README draft, RESULTS (with the final numbers still
+pending), the ADRs and the other docs, spot-checked the code, and compared the numbers with
+stage d's artifact at 13cd4d8. It could run `eval`, `demo`, `trace` and the link check, nothing
+heavy. Its report is verbatim in `docs/reviews/V1_REVIEW.md`. Its line numbers refer to the
+files as they were then.
+
+| # | finding | response | where |
+|---|---|---|---|
+| 1 | High: the isolated Warrant rows sit beside the undefended ones, but the gullible planner under isolation writes the oracle plan by construction | **Fixed.** The rows are labelled "planner isolated". README and RESULTS say these rows measure isolation, and that the leaked-context rows are the kernel against attack plans. | README, RESULTS |
+| 2 | High: WHAT_WENT_WRONG and ADR 0010 imply the generator fix closed the held-out gaps; two are still missed after it | **Fixed.** WHAT_WENT_WRONG, ADR 0010 and the README state the post-fix result from the final run. The shared-root-cause claim is withdrawn for the two still missed. | README, WHAT_WENT_WRONG, ADR 0010, RESULTS |
+| 3 | High: tool and authorship references | **Fixed in the public docs:** RESULTS "written by hand" became "compiled from the run artifacts", "every miss I checked" became "every miss checked", "hand-written plan/shapes" became "fixed" (also in DESIGN), and the descriptions of who wrote the holdout injections and attack plans became "an author who never saw the policies". **Not changed:** DECISIONS, `docs/reviews/`, SPEC's process text and `CLAUDE.md`. They are the working record of how the project was run, and editing them would rewrite the record. Whether they stay in a public repository is the owner's decision before publishing (hand-off). | RESULTS, WHAT_WENT_WRONG |
+| 4 | Medium: "injected text can stop a whole run, but never change what executes" contradicts the rules' declared releases | **Fixed:** "outside the rules' declared releases". | README, ADR 0003 |
+| 5 | Medium: the README mutant paragraph overstates (NI cannot reach every mutant; under-delivering designs omitted; "every number comes from the commands above") | **Fixed.** The paragraph distinguishes the 20 NI-harness mutants from the four deterministic ones, reports the low per-seed shares, and names the command the mutant results come from. | README |
+| 6 | Medium: "never tuned against" the holdout, which has been re-run after every change | **Fixed.** The holdout is described as written separately and since re-run with known results, so it checks generalisation and is not a fresh held-out result. | README, RESULTS, ADR 0010, PROCESS |
+| 7 | Medium: the held-out mutant writer was not blind to the mutant list | **Fixed** with the D-057 wording. | ADR 0010, PROCESS |
+| 8 | Medium: PROCESS understates what the Gate 3 reviewer received | **Fixed.** | PROCESS |
+| 9 | Medium: "108,462 examples" counts generated cases, including invalid ones | **Fixed:** "102,000 examples (108,462 generated cases)". The Gate 3 baseline table above keeps its column, which counts generated cases; its header is read that way from here on. | RESULTS, ADR 0010, WHAT_WENT_WRONG |
+| 10 | Medium: SPEC still describes Phase 4 and `report` | **Fixed:** a v1-scope note at the top of SPEC, and README says v1.1. **Deferred to v1.1:** the `evals/harness.py` docstring, so that v1's code stays byte-identical to the measured commit. | SPEC, README |
+| 11 | Low: "Offline" before the first `uv sync`; no run time for `check` | **Fixed.** | README |
+| 12 | Low: pair counts without "applicable" | **Fixed.** | README |
+| 13 | Low: "almost every pair needs approval" is false for holdout leaked+gullible | **Fixed:** limited to the attacker-plan model. | RESULTS |
+| 14 | Low: the cap sweep omits steering | **Fixed:** a steering column, from the final run's sweep. | RESULTS |
+| 15 | Low: stale comments (`kernel/declassify.py`, `kernel/execution.py`); `make demo` missing | **Makefile fixed.** **Kernel comments deferred to v1.1**, for the same reason as #10. | Makefile |
+| 16 | Low: padding and repetition; no LICENSE; version 0.0.0 | **Version set to 1.0.0** (`pyproject.toml`, `uv.lock`). **Not changed:** the CaMeL and AgentDojo credit appears in README and RESULTS on purpose, because each is an entry point and must credit them. The repeated holdout and leaked-context caveats stay, because each document is meant to be read alone. **LICENSE** is the owner's choice before publishing. | pyproject.toml, uv.lock |
