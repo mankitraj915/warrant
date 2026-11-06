@@ -29,6 +29,7 @@ The non-interference test in `docs/SPEC.md` §5 is how we check this invariant. 
 - **Stop at every gate** (`⛔ GATE` in the spec). Post a report using the template in `docs/SPEC.md` §9, then wait for the owner's decision.
 - **At each gate, run an independent review first.** Spawn a reviewer subagent that gets only the threat model, the design doc, and the code. It never sees your reasoning or the eval results. Its job is to find a way to violate the invariant. Include its findings verbatim in the gate report and address each one.
 - **Commit after each coherent step** with a descriptive message. Keep `scripts/tasks.py check` green on every commit.
+- **No attribution lines.** No co-author trailer or "Generated with" line on commits, pull requests or releases (owner, 2026-11-06; `.claude/settings.json`). Earlier commits stay as they are. Nothing may claim that code or text was written by hand.
 - **Ask the owner** only about scope changes or gate outcomes that change direction. For everything else, decide, record it in `docs/DECISIONS.md`, and continue.
 - **Keep this file current.** Update "Current status" and "Commands" as they change, so a future session can resume cold.
 
@@ -101,7 +102,7 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 Phase: **v1.0.2 shipped** (Gate 3 passed 2026-11-02, tag `gate-3` at 9f2f0c3; v1.0 on PR #48's
 merge commit a8597ac; v1.0.1, docs only, on PR #53's merge commit 620cff4; v1.0.2 on the merge
 commit of the release PR for issue #61). Everything is on `main` (repo
-github.com/mankitraj915/warrant, private). Work goes through one issue, branch and PR per
+github.com/mankitraj915/warrant, public since the owner published it). Work goes through one issue, branch and PR per
 change, merged with merge commits; CI runs `check` and the new-tests-fail-on-base job (D-060,
 D-063, D-066). History through stage c: DECISIONS D-056 to D-059 and "Gate 3 baseline" (every
 required mutant caught at its k-seed design; held-out 2 caught, 3 missed, permanent in RESULTS).
