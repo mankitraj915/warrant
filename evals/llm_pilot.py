@@ -18,7 +18,7 @@ from evals.harness import injections
 from evals.llm_pins import MAX_TOKENS, MODELS, PILOT_SEEDS, PILOT_TASKS, SETTINGS, ModelPin
 from evals.llm_score import ni_oracles, run_instance
 from evals.tasks.dev import USER_TASKS
-from evals.yardstick import correct, parse_text
+from evals.yardstick import correct, parse_text, reads_untrusted
 from planners.llm_local import ReplayPlanner
 
 JOB_MINUTES = 300
@@ -42,13 +42,15 @@ def capacity(
     seconds_per_completion_token: float,
     completion_tokens: float,
     concurrency: int = 20,
+    job_overhead_seconds: float = 0,
 ) -> dict[str, Any]:
-    """§9: at most 256 jobs of at most 300 minutes, within 7 days of wall clock."""
+    """§9: at most 256 jobs of at most 300 minutes, within 7 days of wall clock. Each job also
+    builds the package and loads the model, which comes out of its 300 minutes."""
     total = sum(
         length * seconds_per_prompt_token + completion_tokens * seconds_per_completion_token
         for length in prompt_lengths
     )
-    jobs = math.ceil(total / (JOB_MINUTES * 60))
+    jobs = math.ceil(total / (JOB_MINUTES * 60 - job_overhead_seconds))
     wall_days = math.ceil(jobs / concurrency) * JOB_MINUTES / (60 * 24)
     return {
         "total_seconds": total,
@@ -59,16 +61,18 @@ def capacity(
     }
 
 
-def go_no_go(*, valid: int, correct: int, capacity_passes: bool) -> bool:
-    return valid >= MIN_VALID and correct >= MIN_CORRECT and capacity_passes
+def go_no_go(*, valid: int, correct: int, capacity_passes: bool, stop: bool = False) -> bool:
+    return not stop and valid >= MIN_VALID and correct >= MIN_CORRECT and capacity_passes
 
 
 def score_pilot(pin: ModelPin, records: list[dict[str, Any]]) -> dict[str, Any]:
-    """Each of the 15 instances by replay: a missing key raises and stops the report."""
+    """Each of the 15 instances by replay: a missing key raises and stops the report. Every count
+    comes from the record the replay matched, so no plan is scored under another input."""
     by_task: dict[str, dict[str, int]] = {}
     outcomes: dict[str, int] = {}
     stops: list[str] = []
-    valid = correct_plans = truncated = rejected = 0
+    distinct: set[str] = set()
+    valid = correct_plans = truncated = rejected = reading = oracle_runs = 0
     for name in PILOT_TASKS:
         task = TASKS[name]
         row = by_task.setdefault(name, {"valid": 0, "correct": 0})
@@ -76,20 +80,26 @@ def score_pilot(pin: ModelPin, records: list[dict[str, Any]]) -> dict[str, Any]:
             replay = ReplayPlanner(pin.sha256, pin.template, seed, records)
             instance = run_instance(task, None, "warrant", replay, f"{name}:-:warrant+llm:{seed}")
             outcomes[instance.outcome] = outcomes.get(instance.outcome, 0) + 1
-            record = next(r for r in records if r["task"] == name and r["seed"] == seed)
-            truncated += record["stop_reason"] != "stop"
-            plan = None if record["stop_reason"] != "stop" else parse_text(record["output"])
+            record = replay.matched
+            assert record is not None
+            if record["stop_reason"] != "stop":
+                truncated += 1
+                continue
+            plan = parse_text(record["output"])
             if plan is None:
                 rejected += 1
                 continue
             valid += 1
             row["valid"] += 1
+            distinct.add(record["output"])
+            reading += reads_untrusted(plan, task.world())
             if correct(task, plan):
                 correct_plans += 1
                 row["correct"] += 1
             for injection in injections("dev"):
                 if injection.payload(task) is None:
                     continue
+                oracle_runs += 1
                 for oracle, message in ni_oracles(task, injection, plan, leaked=False):
                     stops.append(f"{name}+{injection.id} seed {seed} {oracle}: {message}")
     return {
@@ -99,6 +109,10 @@ def score_pilot(pin: ModelPin, records: list[dict[str, Any]]) -> dict[str, Any]:
         "rejected": rejected,
         "by_task": by_task,
         "outcomes": outcomes,
+        # An empty stop list means little where few plans read untrusted text (§6.6).
+        "valid_reading_untrusted": reading,
+        "distinct_valid_plans": len(distinct),
+        "oracle_runs": oracle_runs,
         "stops": stops,
     }
 
@@ -123,19 +137,24 @@ def report(pin: ModelPin, raw: Path) -> dict[str, Any]:
     measured = json.loads((raw / "measured.json").read_text(encoding="utf-8"))
     score = score_pilot(pin, records)
     costs = _costs(records)
-    lengths = measured["prompt_lengths"]
+    lengths = json.loads((raw / "prompt_lengths.json").read_text(encoding="utf-8"))
+    overhead = float(measured["load_seconds"]) + float(
+        (raw / "build_seconds.txt").read_text(encoding="utf-8")
+    )
     every = [n for family in lengths.values() for n in family]
     observed = capacity(
         prompt_lengths=every,
         seconds_per_prompt_token=costs["seconds_per_prompt_token_p95"],
         seconds_per_completion_token=costs["seconds_per_completion_token_p95"],
         completion_tokens=costs["completion_tokens_p95"],
+        job_overhead_seconds=overhead,
     )
     worst_case = capacity(
         prompt_lengths=every,
         seconds_per_prompt_token=costs["seconds_per_prompt_token_p95"],
         seconds_per_completion_token=costs["seconds_per_completion_token_p95"],
         completion_tokens=MAX_TOKENS,
+        job_overhead_seconds=overhead,
     )
     longest = max(every)
     latency = [r["latency_seconds"] for r in records]
@@ -154,10 +173,13 @@ def report(pin: ModelPin, raw: Path) -> dict[str, Any]:
         "capacity": observed,
         "capacity_at_max_tokens": worst_case,
         "go": go_no_go(
-            valid=score["valid"], correct=score["correct"], capacity_passes=observed["passes"]
+            valid=score["valid"],
+            correct=score["correct"],
+            capacity_passes=observed["passes"],
+            stop=bool(score["stops"]),
         ),
         "stop": bool(score["stops"]),
-        "measured": {k: v for k, v in measured.items() if k != "prompt_lengths"},
+        "measured": measured,
     }
 
 
@@ -170,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     text = json.dumps(result, indent=1)
     (args.raw / "report.json").write_text(text, encoding="utf-8")
     print(text)
-    return 0
+    return 1 if result["stop"] else 0  # a stop must not look like a green job (§8)
 
 
 if __name__ == "__main__":

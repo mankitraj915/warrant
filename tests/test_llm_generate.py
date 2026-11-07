@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+import evals.llm_generate
 from evals.llm_generate import (
     Job,
     MemoryRefused,
@@ -17,7 +18,7 @@ from evals.llm_generate import (
     pilot_jobs,
     refuse_without_memory,
 )
-from evals.llm_pilot import capacity, go_no_go, percentile, score_pilot
+from evals.llm_pilot import capacity, go_no_go, main, percentile, score_pilot
 from evals.llm_pins import MAX_TOKENS, MODELS, PILOT_SEEDS, PILOT_TASKS, SAMPLING, SETTINGS
 from evals.llm_score import run_instance
 from evals.tasks.dev import USER_TASKS
@@ -49,6 +50,12 @@ class FakeModel:
             "first_token_seconds": 1.0,
             "latency_seconds": 6.0,
         }
+
+
+@pytest.fixture(autouse=True)
+def _a_fresh_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """§5's refusal is per process, and each test stands for one."""
+    monkeypatch.setattr(evals.llm_generate, "_PROCESS_SAW", set(), raising=False)
 
 
 def _written(path: Path) -> list[dict[str, Any]]:
@@ -318,7 +325,7 @@ def test_the_pilot_score_counts_failures_without_retrying(tmp_path: Path) -> Non
     assert score["valid"] == 12
     assert score["correct"] == 12
     assert score["truncated"] == 1
-    assert score["rejected"] == 3
+    assert score["rejected"] == 2
 
 
 def test_a_missing_generation_stops_the_score(tmp_path: Path) -> None:
@@ -326,3 +333,81 @@ def test_a_missing_generation_stops_the_score(tmp_path: Path) -> None:
     generate(FakeModel(), MODELS["granite"], pilot_jobs(), out)
     with pytest.raises(Exception, match="no generation"):
         score_pilot(MODELS["granite"], _written(out)[:-1])
+
+
+# ---- The Gate B review's findings (docs/reviews/V1_1_GATE_B_REVIEW.md). -------------------
+
+
+def test_m2_the_score_judges_the_record_the_replay_matched(tmp_path: Path) -> None:
+    """A record with the same task and seed but another prompt must not be scored."""
+    out = tmp_path / "records.jsonl"
+    generate(FakeModel(), MODELS["granite"], pilot_jobs(), out)
+    keyed = _written(out)
+    stale = [{**r, "key": [r["key"][0], f"{i:064d}", r["key"][2]]} for i, r in enumerate(keyed)]
+    bad = [{**r, "output": "not json"} for r in keyed]
+    score = score_pilot(MODELS["granite"], stale + bad)
+    assert score["outcomes"] == {"rejected": 15}
+    assert score["valid"] == 0
+    assert score["correct"] == 0
+
+
+def test_m5_the_score_says_how_many_valid_plans_could_test_the_oracles(tmp_path: Path) -> None:
+    out = tmp_path / "records.jsonl"
+    generate(FakeModel(), MODELS["granite"], pilot_jobs(), out)
+    score = score_pilot(MODELS["granite"], _written(out))
+    assert score["valid_reading_untrusted"] == 3, "only T11's oracle reads untrusted text"
+    assert score["distinct_valid_plans"] == 5
+    assert score["oracle_runs"] > 0
+
+
+def test_m7_one_process_cannot_generate_warrant_plans_after_ticket_text(tmp_path: Path) -> None:
+    task = TASKS["T01"]
+    text_job = Job("undefended", task.id, None, 11001, _input_of(task, "leaked"))
+    model = FakeModel()
+    generate(model, MODELS["granite"], [text_job], tmp_path / "text.jsonl")
+    with pytest.raises(ValueError, match="own process"):
+        generate(model, MODELS["granite"], pilot_jobs()[:1], tmp_path / "warrant.jsonl")
+    assert len(model.calls) == 1
+
+
+def test_m7_the_prompt_lengths_run_as_their_own_mode() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "llm-run.yml").read_text(encoding="utf-8")
+    assert "evals.llm_generate lengths" in workflow
+    assert "evals.llm_generate pilot" in workflow
+
+
+def test_l3_a_stop_is_never_a_go_and_fails_the_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert go_no_go(valid=15, correct=15, capacity_passes=True, stop=True) is False
+    monkeypatch.setattr("evals.llm_pilot.report", lambda pin, raw: {"stop": True, "go": False})
+    assert main(["--model", "granite", "--raw", str(tmp_path)]) != 0
+
+
+def test_l7_a_torn_last_line_is_dropped_and_generation_resumes(tmp_path: Path) -> None:
+    out = tmp_path / "records.jsonl"
+    jobs = pilot_jobs()
+    generate(FakeModel(), MODELS["granite"], jobs[:2], out)
+    whole = out.read_text(encoding="utf-8")
+    out.write_text(whole + '{"key": ["torn', encoding="utf-8")
+    generate(FakeModel(), MODELS["granite"], jobs[:3], out)
+    records = _written(out)
+    assert len(records) == 3
+
+
+def test_capacity_counts_each_jobs_load_and_build_time() -> None:
+    plain = capacity(
+        prompt_lengths=[1000] * 18,
+        seconds_per_prompt_token=1.0,
+        seconds_per_completion_token=0.0,
+        completion_tokens=0,
+    )
+    assert plain["jobs"] == 1
+    loaded = capacity(
+        prompt_lengths=[1000] * 18,
+        seconds_per_prompt_token=1.0,
+        seconds_per_completion_token=0.0,
+        completion_tokens=0,
+        job_overhead_seconds=600,
+    )
+    assert loaded["jobs"] == 2
