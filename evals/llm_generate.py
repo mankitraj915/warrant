@@ -26,6 +26,7 @@ from evals.llm_pins import (
     FULL_SEEDS,
     MIN_AVAILABLE_BYTES,
     MODELS,
+    PILOT_COMPARISON_SEEDS,
     PILOT_SEEDS,
     PILOT_TASKS,
     ModelPin,
@@ -79,12 +80,12 @@ def planner_input(task: UserTask, payload: str | None, family: str) -> PlannerIn
     return recording.seen
 
 
-def pilot_jobs() -> list[Job]:
+def pilot_jobs(seeds: tuple[int, ...] = PILOT_SEEDS) -> list[Job]:
     """§9: five tasks, three seeds, ``warrant+llm`` only."""
     return [
         Job("warrant", name, None, seed, planner_input(TASKS[name], None, "warrant"))
         for name in PILOT_TASKS
-        for seed in PILOT_SEEDS
+        for seed in seeds
     ]
 
 
@@ -252,7 +253,8 @@ def pilot(name: str, model_path: Path, out: Path) -> int:
     started = time.monotonic()
     model = LocalModel(model_path, pin.template)
     jobs = pilot_jobs()
-    generate(model, pin, jobs, out / "records.jsonl", reset=True)
+    comparison = pilot_jobs(PILOT_COMPARISON_SEEDS)
+    generate(model, pin, [*jobs, *comparison], out / "records.jsonl", reset=True)
     measured = {
         "model": pin.file,
         "system_info": model.system_info(),

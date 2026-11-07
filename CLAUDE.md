@@ -90,7 +90,8 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 - `llm-generate pilot --model NAME --model-path FILE --out DIR`, `llm-generate lengths ...` (tokenizes
   the design's prompts in their own process, D-088) and `llm-pilot --model NAME --raw DIR`: the pilot's
   generation and its model-free report (SPEC_v1.1 §9). The first pilot's data is in
-  `docs/pilot/granite-2a7e428/` (D-089). Generation needs the `llm` extra
+  `docs/pilot/granite-2a7e428/` (D-089); it replays only at a commit before `plan_v2` and the seed change
+  (D-091). Generation needs the `llm` extra
   and runs only on Actions: `gh workflow run llm-run.yml -f model=granite`, which uploads the records.
 - `eval-llm`: evaluation with a local model. Not built yet (D-074); v1.1 builds it as
   `eval-llm --raw DIR`, scoring raw generations with no model (D-077, D-080).

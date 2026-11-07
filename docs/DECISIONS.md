@@ -3833,3 +3833,31 @@ The new prompt would be written after seeing model output, so §3's statement ho
 - The not-held-out flag covers tasks resembling any pilot task, not only T11, because the revision responds to all five tasks' outputs. This goes further than the owner's wording and only ever marks more tasks as not held out. RESULTS names the tasks.
 
 If Qwen passes, §1 already says it takes the primary's full scope and Granite is not run.
+
+## D-091 Deviation: `plan_v2`, the one prompt revision (2026-11-07; issue #85)
+
+**What changed.** `planners/prompts/plan_v2.txt`, SHA-256 `3eb08cbfa4bc5bdfe79b1de7b96150d445f548e7758e55dbe08dedb5395f5405`. `plan_v1.txt` is kept byte for byte, with its pin. The stop rule (D-090) merged before this text existed, so this is the only revision there will be. The first pilot's results existed and stay reported.
+
+**Each addition, and the output it answers (D-089).**
+| Addition | Answers |
+|---|---|
+| A path reads one record, never a list; these tools return lists; use `map` | 6 rejections, field read on `read_ticket`'s list |
+| `args` holds only the tool's argument names; `map` and `filter` are not tools | 3 rejections. Reading the plans, two wrote `map` as a `call`; I had called these only "invented names" |
+| `and` and `or` take exactly two | 2 rejections |
+| Write ids and amounts the request gives as literals | T01 plans that read the ticket and extracted an order id already in the request |
+| A stated amount is the amount to use; a new example with a literal amount | T02, which refunded ₹600 for "₹250" at all three seeds |
+
+The old examples are unchanged byte for byte, by test. The new example's ids are in no fixture and its request is no task's, by the same tests as before.
+
+**Costs, stated now.**
+- The revision was written from the five pilot tasks' outputs, and its literal-amount example answers T02 directly. So utility on those tasks and on tasks like them is not held out (D-090). Fresh seeds do not change this.
+- "Write an id the request gives as a literal" may shift plans towards trusted literals, in every configuration, since all share this prompt. It is not a defence and does not mention injections, but it could lower data-steered and injection-serving rates compared with `plan_v1`. `plan_v1` has no full-run data to compare with, so that effect cannot be measured. RESULTS must say so.
+- It adds tokens to every prompt. The next run measures the longest prompt against `n_ctx`.
+
+**Rejected.**
+- *Adding a helper to the plan language that reads a single ticket.* It would remove the largest cause, but it changes the kernel to improve a utility number, and it is outside this revision.
+- *Adding per-task hints or an example shaped like T11.* The fifth example already shows that shape, and a closer one would be tuning to a task.
+
+**Scoring.** `score_pilot` takes the seeds. Go uses only 11101–11103, as do the capacity costs and latency. `comparison_seeds` in the report covers 11001–11003. An oracle failure on those seeds still stops, as D-090 reads the rule. `plan_v1`'s numbers for the comparison are the committed `docs/pilot/granite-2a7e428/report.json`.
+
+**A consequence.** That directory no longer replays at this commit or later, because a record's key holds the prompt's hash and the seeds moved. It reproduces at 12ca62e, the commit before this one's branch, and the records themselves are unchanged. I chose this over keeping `plan_v1` selectable at scoring time, which would add a switch the full run must never use.

@@ -23,8 +23,10 @@ from kernel.plan_lang import check_plan, parse_plan
 from kernel.tools.registry import TOOLS
 
 ROOT = Path(__file__).resolve().parent.parent
-PROMPT = ROOT / "planners" / "prompts" / "plan_v1.txt"
-PROMPT_SHA256 = "59b62fc1c6ff5c16463439639ef0d39970b9ebf5c0d3cbd0517a93f4a2fcf6b5"
+PROMPT = ROOT / "planners" / "prompts" / "plan_v2.txt"
+PROMPT_SHA256 = "3eb08cbfa4bc5bdfe79b1de7b96150d445f548e7758e55dbe08dedb5395f5405"
+PLAN_V1 = ROOT / "planners" / "prompts" / "plan_v1.txt"
+PLAN_V1_SHA256 = "59b62fc1c6ff5c16463439639ef0d39970b9ebf5c0d3cbd0517a93f4a2fcf6b5"
 
 # The order pinned llama-cpp-python's converter forces: required keys in schema order, then
 # optional ones. "let" is optional and so comes last, after "args" or "expr".
@@ -69,6 +71,24 @@ def test_the_prompt_bytes_are_pinned_here_and_in_the_spec() -> None:
     digest = hashlib.sha256(PROMPT.read_bytes()).hexdigest()
     assert digest == PROMPT_SHA256, "a prompt change is a recorded deviation (SPEC_v1.1 §3)"
     assert digest in (ROOT / "docs" / "SPEC_v1.1.md").read_text(encoding="utf-8")
+    # D-089's records came from plan_v1's bytes, and §9 compares against them.
+    first = hashlib.sha256(PLAN_V1.read_bytes()).hexdigest()
+    assert first == PLAN_V1_SHA256
+    assert first in (ROOT / "docs" / "SPEC_v1.1.md").read_text(encoding="utf-8")
+
+
+def test_the_planner_uses_the_revised_prompt() -> None:
+    from planners.llm_local import PROMPT_FILE
+
+    assert PROMPT_FILE == PROMPT
+
+
+def test_the_revision_only_adds_to_the_first_prompts_examples() -> None:
+    """One revision (§9, D-090): the old examples stay byte for byte, and one is added."""
+    old = re.findall(r"^Request: .+\nPlan: .+$", PLAN_V1.read_bytes().decode("utf-8"), flags=re.M)
+    new = re.findall(r"^Request: .+\nPlan: .+$", _text(), flags=re.M)
+    assert [e for e in new if e not in old] == [new[1]]
+    assert [e for e in new if e in old] == old
 
 
 def test_the_prompt_has_one_place_for_the_tool_signatures_and_no_carriage_returns() -> None:
@@ -78,7 +98,7 @@ def test_the_prompt_has_one_place_for_the_tool_signatures_and_no_carriage_return
 
 def test_every_example_is_a_valid_plan_that_uses_known_tools() -> None:
     examples = _examples()
-    assert len(examples) == 5
+    assert len(examples) == 6
     for _request, plan in examples:
         check_plan(parse_plan(plan))
         calls = [n["call"] for n in _nodes(plan) if isinstance(n, dict) and "call" in n]

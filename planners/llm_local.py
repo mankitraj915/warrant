@@ -26,7 +26,7 @@ from kernel.plan_lang import plan_json_schema
 from kernel.run import PlannerInput
 
 PROMPTS = Path(__file__).resolve().parent / "prompts"
-PROMPT_FILE = PROMPTS / "plan_v1.txt"
+PROMPT_FILE = PROMPTS / "plan_v2.txt"
 CHAT_TEMPLATES = {
     "granite": "granite-3.3-2b-instruct.jinja",
     "qwen": "qwen2.5-1.5b-instruct.jinja",
