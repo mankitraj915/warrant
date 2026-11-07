@@ -10,10 +10,13 @@ mutant when ``WARRANT_MUTANT`` is ``<name>`` (or ``*``: each marked test's own);
 ``test_harness_catches_deterministic_mutant`` use that.
 """
 
+from collections import Counter
 from dataclasses import replace
 from typing import Any
 
+import evals.llm_score
 import evals.tasks.dev
+import evals.yardstick
 import kernel.declassify
 import kernel.execution
 import kernel.policy
@@ -39,6 +42,27 @@ def _origins_without_row(ticket: int) -> set[str]:
     return _case_ticket_origins(ticket) - {cell_origin("tickets", ticket, EXISTS)}
 
 
+_Accounted = evals.yardstick.Accounted
+
+
+def _accounted_with(**changes: Any) -> Any:
+    """``account`` builds its result last, so a mutant can change one field of it. Each value is
+    a function of the fields ``account`` computed."""
+
+    def build(**fields: Any) -> Any:
+        return _Accounted(**{**fields, **{k: f(fields) for k, f in changes.items()}})
+
+    return build
+
+
+def _with_zero_amounts(after: Counter[Any], before: Counter[Any]) -> Counter[Any]:
+    return after - before
+
+
+def _ignoring_before(after: Counter[Any], before: Counter[Any]) -> Counter[Any]:
+    return Counter({e: n for e, n in after.items() if e[0] == "closure" or e[3] != 0})
+
+
 DETERMINISTIC_MUTANTS: dict[str, tuple[Any, str, Any]] = {
     # Gate 3 review #3: the between-effects re-check never stops the run.
     "re-check never stops": (
@@ -61,4 +85,34 @@ DETERMINISTIC_MUTANTS: dict[str, tuple[Any, str, Any]] = {
         "INJECTION_TASKS",
         (replace(evals.tasks.dev.INJECTION_TASKS[0], payload=lambda task: "<|end_of_text|>"),),
     ),
+    # Gate B review, M1: accounting no calibration test noticed when it broke.
+    "U ignores B": (
+        evals.yardstick,
+        "Accounted",
+        _accounted_with(unauthorized=lambda f: f["strict"]),
+    ),
+    "rule-released ignores I and B": (
+        evals.yardstick,
+        "Accounted",
+        _accounted_with(rule_released=lambda f: f["executed"] & f["released"]),
+    ),
+    "A is always empty": (
+        evals.yardstick,
+        "Accounted",
+        _accounted_with(approved=lambda f: Counter()),
+    ),
+    "strict drops all-trusted effects": (
+        evals.yardstick,
+        "Accounted",
+        _accounted_with(strict_trusted=lambda f: Counter()),
+    ),
+    "goodwill predicate always holds": (
+        evals.yardstick,
+        "_goodwill_holds",
+        lambda pre, effect, run: True,
+    ),
+    "E keeps zero amounts": (evals.llm_score, "_added", _with_zero_amounts),
+    "E ignores the initial state": (evals.llm_score, "_added", _ignoring_before),
+    # Gate B review, M8: the pinned list of pairs whose attack plan is not Serving.
+    "planned effects are empty": (evals.yardstick, "planned", lambda plan, world: Counter()),
 }

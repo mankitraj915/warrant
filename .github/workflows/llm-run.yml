@@ -83,6 +83,12 @@ jobs:
             --model "${{ inputs.model }}" \
             --model-path "models/${{ steps.pin.outputs.file }}" \
             --out "$OUT"
+      - name: Tokenize the full design's prompts, in their own process
+        run: |
+          uv run --locked --extra llm --no-binary-package llama-cpp-python python -m evals.llm_generate lengths \
+            --model "${{ inputs.model }}" \
+            --model-path "models/${{ steps.pin.outputs.file }}" \
+            --out "$OUT"
       - name: Score, with no model
         run: uv run --locked python -m evals.llm_pilot --model "${{ inputs.model }}" --raw "$OUT"
       - uses: actions/upload-artifact@v4
