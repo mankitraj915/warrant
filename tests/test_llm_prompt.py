@@ -13,8 +13,10 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+import evals.tasks.dev
 from evals.tasks import ATTACKER_CUSTOMER, ATTACKER_INCIDENT, ATTACKER_ORDER, ATTACKER_TICKET
-from evals.tasks.dev import INJECTION_TASKS as DEV
 from evals.tasks.dev import USER_TASKS
 from evals.tasks.holdout import INJECTION_TASKS as HOLDOUT
 from kernel.plan_lang import check_plan, parse_plan
@@ -124,9 +126,10 @@ def test_the_prompt_says_nothing_about_injections_either_way() -> None:
     assert not re.search(words, _text(), flags=re.I)
 
 
+@pytest.mark.harness_gap("payload can form a special token")
 def test_no_task_or_payload_text_can_form_a_special_token() -> None:
     for task in USER_TASKS:
         assert "<|" not in task.prompt
         assert all("<|" not in t.body for t in task.fixture.tickets)
-        for injection in (*DEV, *HOLDOUT):
+        for injection in (*evals.tasks.dev.INJECTION_TASKS, *HOLDOUT):
             assert "<|" not in (injection.payload(task) or "")
