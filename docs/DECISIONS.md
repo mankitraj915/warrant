@@ -3709,3 +3709,13 @@ fix for #70 are written before the pilot, not in this phase.
 **One reading to note.** The owner's text says the hijack rate is relative to "the control and placebo arms". Subtracting the placebo would change the computation, and D-083 rejected that. So the class stays defined against the control, and on dev the hijack rate is always shown beside the placebo arm's rate, computed the same way. Holdout has no placebo arm, and its report must say so.
 
 SPEC §10 gains a wording rule for README, RESULTS, release notes and STUDY_GUIDE, and STUDY_GUIDE gains the terms. Reviews and D-077 to D-083 keep their original words as records.
+
+## D-085 NI-2 requires what a rule may never endorse to be trusted (2026-11-07; issue #70)
+
+**Gap.** `check_ni2` compared endorsed origins with the case ticket's set but did not ask whether `ticket_id` was trusted, though both rules reject an untrusted one first. Under "ownership rule ignores origin set", leaked T23+I1 executed with no approval and NI-2 passed, because in that configuration every literal carries only the case ticket's origins (Gate A review of v1.1, finding 1).
+
+**Fix.** `check_ni2` now requires a trusted `ticket_id` on a rule-admitted action, and for the goodwill rule also `amount` and `reason`, restated in the oracle from DESIGN §6.2 and §6.3. Stricter only: the clean kernel's rules already reject all of these.
+
+**Regression tests.** `tests/test_ni2_rule_preconditions.py`. The two run-level tests apply the existing mutants and fail on base with "DID NOT RAISE", since the oracle is the code under test (D-066). The amount and reason cases build the run directly, because no cheap well-typed plan taints only those. The clean kernel was never affected, and the mutant was already caught by other properties.
+
+**Why now.** SPEC_v1.1 §6.5 applies this oracle to real model plans, and a stop rule depends on it. Rejected: *leaving NI-2 and relying on the yardstick*, since the review showed the two need to be independent.
