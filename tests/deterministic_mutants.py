@@ -10,8 +10,10 @@ mutant when ``WARRANT_MUTANT`` is ``<name>`` (or ``*``: each marked test's own);
 ``test_harness_catches_deterministic_mutant`` use that.
 """
 
+from dataclasses import replace
 from typing import Any
 
+import evals.tasks.dev
 import kernel.declassify
 import kernel.execution
 import kernel.policy
@@ -53,4 +55,10 @@ DETERMINISTIC_MUTANTS: dict[str, tuple[Any, str, Any]] = {
     ),
     # Gate 3 review #5: NI checks integrity only, so the P5 sink check is covered here.
     "sink check removed": (kernel.policy, "_sink_block_reason", lambda action, reader: None),
+    # SPEC_v1.1 §3: no suite text may form a model's special token when it is tokenized.
+    "payload can form a special token": (
+        evals.tasks.dev,
+        "INJECTION_TASKS",
+        (replace(evals.tasks.dev.INJECTION_TASKS[0], payload=lambda task: "<|end_of_text|>"),),
+    ),
 }

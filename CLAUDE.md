@@ -87,8 +87,8 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
   `tests/deterministic_mutants.py`, D-063; it lists tests changed in place and new mutants, and
   refuses uncommitted changes under `tests/`, D-073), and the manual
   `owner-stages.yml` (`gh workflow run owner-stages.yml -f stage=d`), which uploads results.
-- `eval-llm`: evaluation with a local model. Not in v1 (D-074): v1 ships without a
-  language-model planner; planned for v1.1, with no CI-only model job before then.
+- `eval-llm`: evaluation with a local model. Not built yet (D-074); v1.1 builds it as
+  `eval-llm --raw DIR`, scoring raw generations with no model (D-077, D-080).
 - `report`: regenerate `docs/RESULTS.md`. Not in v1 (D-075): RESULTS is hand-written from the
   run artifacts; planned for v1.1.
 - `demo`: scripted demonstration (`scripts/demo.py`): an outage bulk refund approved by hash
@@ -99,7 +99,28 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 
 ## Current status
 
-Phase: **v1.0.2 shipped** (Gate 3 passed 2026-11-02, tag `gate-3` at 9f2f0c3; v1.0 on PR #48's
+**Now: v1.1, Phase A (pre-registration), at ⛔ Gate A, waiting for the owner.** No model has been
+run. The owner's brief (2026-11-06) commits to two releases:
+- **v1.1, a real model as the planner:** A pre-registration (`docs/SPEC_v1.1.md`, D-077 to D-083,
+  prompt `planners/prompts/plan_v1.txt`, pinned by `tests/test_llm_prompt.py`; review in
+  `docs/reviews/V1_1_GATE_A_REVIEW.md`) ⛔, and on the owner's go, tag `v1.1-gate-a`; B pilot on
+  Actions, 5 tasks x 3 seeds, after SPEC §7's calibration tests and #70 (strengthen `check_ni2`)
+  ⛔ go/no-go; C full run, RESULTS section "Real-model results (v1.1)", independent review ⛔, then
+  tag `v1.1.0` and release.
+- **v1.2, bounded exhaustive verification:** D `docs/SPEC_v1.2.md` ⛔; E enumerator (small N in
+  `check`, full N on Actions), deterministic tests for #10 and #11, fix for #60, an ADR ⛔, then
+  tag `v1.2.0` and release.
+
+Rules from the brief, on top of "How to work": pre-register metrics, thresholds, bounds and claims
+before the run that measures them, and record any later change as a numbered deviation; one issue,
+one branch (`llm/<issue>-pilot`, `verify/<issue>-enumerator`) and one PR per unit of work, labelled
+`invariant`, `bug`, `harness-gap`, `docs`, `held-out-miss`, `finding` or `llm`; small commits, each
+leaving `check` green; annotated tags per gate (`v1.1-gate-a`, ...) with GitHub releases; merge only on
+green CI, except as at #59. **Every model run and every run heavier than `check` goes on Actions or
+into an owner-run command, never in a session.** Poll Actions with occasional `gh run view`, no
+background watchers. If a result weakens a README claim, fix the README in the same PR.
+
+Earlier: **v1.0.2 shipped** (Gate 3 passed 2026-11-02, tag `gate-3` at 9f2f0c3; v1.0 on PR #48's
 merge commit a8597ac; v1.0.1, docs only, on PR #53's merge commit 620cff4; v1.0.2 on the merge
 commit of the release PR for issue #61). Everything is on `main` (repo
 github.com/mankitraj915/warrant, public since the owner published it). Work goes through one issue, branch and PR per
