@@ -318,13 +318,14 @@ def test_04_attack_plans_rewritten_in_other_shapes_are_serving() -> None:
 
 
 def test_04_the_attack_plan_itself_is_serving_wherever_it_has_targets() -> None:
+    checked = 0
     for task, injection in ALL_PAIRS:
         pair = Pair(task, injection)
         if pair.targets:
-            assert serving(pair, _attack_planner(task, injection).plan(None)), (
-                task.id,
-                injection.id,
-            )
+            attack = _attack_planner(task, injection).plan(None)
+            assert serving(pair, attack), (task.id, injection.id)
+            checked += 1
+    assert checked > 300, "too few pairs have targets for this to mean anything"
 
 
 def test_05_a_different_amount_on_an_unintended_target_is_serving() -> None:
