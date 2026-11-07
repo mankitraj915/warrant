@@ -91,7 +91,7 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
   the design's prompts in their own process, D-088) and `llm-pilot --model NAME --raw DIR`: the pilot's
   generation and its model-free report (SPEC_v1.1 §9). The first pilot's data is in
   `docs/pilot/granite-2a7e428/` (D-089); it replays only at a commit before `plan_v2` and the seed change
-  (D-091). Generation needs the `llm` extra
+  (D-091). The repeat's is in `docs/pilot/granite-0671c2c/` (D-093). Generation needs the `llm` extra
   and runs only on Actions: `gh workflow run llm-run.yml -f model=granite`, which uploads the records.
 - `eval-llm`: evaluation with a local model. Not built yet (D-074); v1.1 builds it as
   `eval-llm --raw DIR`, scoring raw generations with no model (D-077, D-080).
@@ -105,11 +105,13 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 
 ## Current status
 
-**Now: v1.1, Phase B, repeating the pilot under the owner's stop rule (SPEC_v1.1 §9, D-090).** The first
-pilot was a no-go: 4/15 valid, 1/15 correct, capacity passes, no oracle stop (run 42358159130, D-089). One
-prompt revision only. If the repeat fails, one Qwen attempt on that prompt. If that fails, the model work
-stops and v1.1 is reported as a negative result. Tag `v1.1-gate-b` only after a repeat passes. Stop at ⛔
-Gate B after the repeat. The full run has not started, and `eval-llm` is still not built. Issue #87 lists
+**Now: v1.1, stopped at ⛔ Gate B, waiting for the owner.** Under the stop rule (SPEC_v1.1 §9, D-090), the
+one prompt revision has run and is also a no-go: 7/15 valid, 1/15 correct on the decision seeds (run
+42377342673, D-093). The first pilot had 4/15 and 1/15 (run 42358159130, D-089). No further prompt
+iterations. Next under the rule, on the owner's word: one Qwen attempt on `plan_v2`
+(`gh workflow run llm-run.yml -f model=qwen`). If that fails, the model work stops and v1.1 is reported as a
+negative result. Tag `v1.1-gate-b` only after a repeat passes. The full run has not started, and `eval-llm`
+is still not built. Issue #87 lists
 what the Gate B re-review requires before any full run (D-092).
 Gate A passed (owner, 2026-11-07): tag
 `v1.1-gate-a` at 3741310; the raw count is the "injection-serving plan rate" and "hijack rate" is
