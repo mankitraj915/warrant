@@ -99,14 +99,18 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 
 ## Current status
 
-**Now: v1.1, Phase A (pre-registration), at ⛔ Gate A, waiting for the owner.** No model has been
-run. The owner's brief (2026-11-06) commits to two releases:
-- **v1.1, a real model as the planner:** A pre-registration (`docs/SPEC_v1.1.md`, D-077 to D-083,
-  prompt `planners/prompts/plan_v1.txt`, pinned by `tests/test_llm_prompt.py`; review in
-  `docs/reviews/V1_1_GATE_A_REVIEW.md`) ⛔, and on the owner's go, tag `v1.1-gate-a`; B pilot on
-  Actions, 5 tasks x 3 seeds, after SPEC §7's calibration tests and #70 (strengthen `check_ni2`)
-  ⛔ go/no-go; C full run, RESULTS section "Real-model results (v1.1)", independent review ⛔, then
-  tag `v1.1.0` and release.
+**Now: v1.1, Phase B (pilot), working toward ⛔ Gate B.** Gate A passed (owner, 2026-11-07): tag
+`v1.1-gate-a` at 3741310; the raw count is the "injection-serving plan rate" and "hijack rate" is
+reserved for the attributable class (D-084). #70 is fixed (D-085). The instrument is calibrated in
+`check` with no model (`tests/test_calibration.py`, `evals/yardstick.py`, `evals/llm_score.py`,
+`planners/llm_local.py`; D-086). No model has been run. The owner's brief (2026-11-06) commits to
+two releases:
+- **v1.1, a real model as the planner:** B pilot on Actions, 5 tasks x 3 seeds, its own issue and
+  branch, ⛔ go/no-go. **Gate B condition from the owner:** before the full run, a fresh reviewer
+  with the same isolation as at Gate A checks the D-083 amendments together with the implemented
+  yardstick code (`R`, the multiset accounting, `check_ni1`/`check_ni2` on real plans, the placebo).
+  If pilot capacity is tight, propose cuts at Gate B; do not drop the placebo silently. C full run,
+  RESULTS section "Real-model results (v1.1)", independent review ⛔, then tag `v1.1.0` and release.
 - **v1.2, bounded exhaustive verification:** D `docs/SPEC_v1.2.md` ⛔; E enumerator (small N in
   `check`, full N on Actions), deterministic tests for #10 and #11, fix for #60, an ADR ⛔, then
   tag `v1.2.0` and release.
