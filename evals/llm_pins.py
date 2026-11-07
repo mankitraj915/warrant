@@ -44,5 +44,6 @@ SAMPLING = {"temperature": 0.2, "top_k": 40, "top_p": 0.95, "min_p": 0.0, "repea
 MIN_AVAILABLE_BYTES = 3_000_000_000
 
 PILOT_TASKS = ("T01", "T02", "T04", "T11", "T23")
-PILOT_SEEDS = (11001, 11002, 11003)
+PILOT_SEEDS = (11101, 11102, 11103)  # the repeat's go/no-go (§9, D-090)
+PILOT_COMPARISON_SEEDS = (11001, 11002, 11003)  # the first pilot's: compared, never decisive
 FULL_SEEDS = (21001, 21002, 21003)

@@ -81,7 +81,8 @@ def test_the_runtime_settings_are_the_registered_ones() -> None:
 
 def test_the_pilot_design_is_the_registered_one() -> None:
     assert PILOT_TASKS == ("T01", "T02", "T04", "T11", "T23")
-    assert PILOT_SEEDS == (11001, 11002, 11003)
+    assert PILOT_SEEDS == (11101, 11102, 11103)
+    assert "decision 11101, 11102, 11103; comparison 11001, 11002, 11003" in SPEC
 
 
 def test_the_extra_pins_the_package_and_the_lock_pins_the_sdist() -> None:
@@ -158,7 +159,7 @@ def test_records_hold_what_the_spec_names_and_replay_through_the_kernel(tmp_path
     ):
         assert field in records[0], field
     task = TASKS["T01"]
-    replay = ReplayPlanner(MODELS["granite"].sha256, "granite", 11001, records)
+    replay = ReplayPlanner(MODELS["granite"].sha256, "granite", PILOT_SEEDS[0], records)
     instance = run_instance(task, None, "warrant", replay, "replayed")
     assert instance.raw_plan == task.oracle
 
@@ -393,6 +394,109 @@ def test_l7_a_torn_last_line_is_dropped_and_generation_resumes(tmp_path: Path) -
     generate(FakeModel(), MODELS["granite"], jobs[:3], out)
     records = _written(out)
     assert len(records) == 3
+
+
+# ---- The repeat: fresh seeds decide, the first pilot's seeds only compare (§9, D-090). ------
+
+
+def _raw(tmp_path: Path, *, decision: str | None = None, comparison: str | None = None) -> Path:
+    """A pilot artifact from the fake model, with one seed set's outputs replaced if asked."""
+    from evals.llm_pins import PILOT_COMPARISON_SEEDS
+
+    out = tmp_path / "records.jsonl"
+    generate(FakeModel(), MODELS["granite"], pilot_jobs(), out)
+    generate(FakeModel(), MODELS["granite"], pilot_jobs(PILOT_COMPARISON_SEEDS), out)
+    records = _written(out)
+    for record in records:
+        if record["seed"] in PILOT_SEEDS and decision is not None:
+            record["output"] = decision
+        if record["seed"] in PILOT_COMPARISON_SEEDS and comparison is not None:
+            record["output"] = comparison
+    out.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+    (tmp_path / "measured.json").write_text('{"load_seconds": 1.0}', encoding="utf-8")
+    (tmp_path / "prompt_lengths.json").write_text('{"warrant": [100]}', encoding="utf-8")
+    (tmp_path / "build_seconds.txt").write_text("1\n", encoding="utf-8")
+    return tmp_path
+
+
+def test_the_comparison_seeds_cannot_turn_a_no_go_into_a_go(tmp_path: Path) -> None:
+    from evals.llm_pilot import report
+
+    result = report(MODELS["granite"], _raw(tmp_path, decision="not json"))
+    assert result["score"]["valid"] == 0
+    assert result["comparison_seeds"]["valid"] == 15
+    assert result["go"] is False
+
+
+def test_the_comparison_seeds_cannot_turn_a_go_into_a_no_go(tmp_path: Path) -> None:
+    from evals.llm_pilot import report
+
+    result = report(MODELS["granite"], _raw(tmp_path, comparison="not json"))
+    assert result["score"]["valid"] == 15
+    assert result["comparison_seeds"]["valid"] == 0
+    assert result["go"] is True
+
+
+def test_an_oracle_failure_on_a_comparison_seed_is_still_a_stop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from evals import llm_pilot
+    from evals.llm_pins import PILOT_COMPARISON_SEEDS
+
+    real = llm_pilot.score_pilot
+
+    def failing(pin: Any, records: Any, seeds: Any = PILOT_SEEDS) -> dict[str, Any]:
+        score = real(pin, records, seeds)
+        return {**score, "stops": ["NI-1"]} if seeds == PILOT_COMPARISON_SEEDS else score
+
+    monkeypatch.setattr(llm_pilot, "score_pilot", failing)
+    result = llm_pilot.report(MODELS["granite"], _raw(tmp_path))
+    assert result["stop"] is True
+    assert result["go"] is False
+
+
+def test_the_capacity_estimate_comes_from_the_decision_seeds(tmp_path: Path) -> None:
+    from evals.llm_pilot import report
+    from evals.llm_pins import PILOT_COMPARISON_SEEDS
+
+    raw = _raw(tmp_path)
+    records = _written(raw / "records.jsonl")
+    for record in records:
+        if record["seed"] in PILOT_COMPARISON_SEEDS:
+            record["completion_tokens"] = 999
+    (raw / "records.jsonl").write_text(
+        "".join(json.dumps(r) + "\n" for r in records), encoding="utf-8"
+    )
+    assert report(MODELS["granite"], raw)["costs"]["completion_tokens_p95"] == 50
+
+
+def test_the_pilot_job_generates_both_seed_sets_and_checks_determinism_on_the_decision_ones(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from evals.llm_pins import PILOT_COMPARISON_SEEDS
+
+    class Loaded(FakeModel):
+        load_seconds = 1.0
+        grammar_conversion_seconds = 0.0
+
+        def __init__(self, _path: Path, _template: str) -> None:
+            super().__init__()
+
+        @staticmethod
+        def system_info() -> str:
+            return ""
+
+        def grammar_native_overhead(self) -> float:
+            return 0.0
+
+    monkeypatch.setattr(evals.llm_generate, "LocalModel", Loaded)
+    monkeypatch.setattr(evals.llm_generate, "available_memory_bytes", lambda: 10**10)
+    assert evals.llm_generate.pilot("granite", tmp_path / "model", tmp_path) == 0
+    records = _written(tmp_path / "records.jsonl")
+    assert len(records) == 30
+    assert {r["seed"] for r in records} == {*PILOT_SEEDS, *PILOT_COMPARISON_SEEDS}
+    measured = json.loads((tmp_path / "measured.json").read_text(encoding="utf-8"))
+    assert measured["determinism"]["same_with_reset"] is True
 
 
 def test_capacity_counts_each_jobs_load_and_build_time() -> None:

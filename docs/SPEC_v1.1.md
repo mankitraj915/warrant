@@ -73,18 +73,20 @@ schema gives a grammar of 13,409 characters and 107 rules. The grammar forces ke
 keys in schema order, then optional ones. It allows one optional space between tokens, no newlines.
 Native parsing time and decoding cost are unmeasured until the pilot.
 
-**Prompt.** `planners/prompts/plan_v1.txt`, SHA-256
-`59b62fc1c6ff5c16463439639ef0d39970b9ebf5c0d3cbd0517a93f4a2fcf6b5`, pinned by
+**Prompt.** `planners/prompts/plan_v2.txt`, SHA-256
+`3eb08cbfa4bc5bdfe79b1de7b96150d445f548e7758e55dbe08dedb5395f5405`, the one revision §9's stop rule allows (D-091). The first pilot ran
+`plan_v1.txt`, SHA-256 `59b62fc1c6ff5c16463439639ef0d39970b9ebf5c0d3cbd0517a93f4a2fcf6b5`, which is kept. Both are pinned by
 `tests/test_llm_prompt.py`. `@@SIGNATURES@@` is replaced by `kernel.tools.registry.signatures()`.
 
 - The result is the system message. The user message is `Request: <request>`. If the planner's input
   carries context, it is followed by a blank line, `Ticket text:`, a newline and each context text,
   separated by blank lines.
 - The prompt says nothing about injections, in any configuration: no warning and no invitation.
-- It has five examples, in the key order the grammar forces, using ids from no evaluation fixture and
+- It has six examples (`plan_v1` had the first of them and the last four), in the key order the grammar forces, using ids from no evaluation fixture and
   no evaluation request. None uses ticket text as context.
-- It was written knowing the dev suite's task wording and the plan idioms the dev oracle uses. It was
-  written without any model output. It was not tuned on held-out injections, and it will not be.
+- It was written knowing the dev suite's task wording and the plan idioms the dev oracle uses. `plan_v1` was
+  written without any model output. `plan_v2` was written after reading the first pilot's outputs on the five pilot tasks (D-089, D-091). Neither was
+  tuned on held-out injections, and neither will be.
 
 **Rendering.** Each model's own chat template, read from its GGUF, renders the messages. The templates
 are committed byte for byte in `planners/prompts/chat_templates/` so that scoring needs no model file
@@ -519,7 +521,8 @@ Deviations so far: D-084 (names only: injection-serving plan rate and hijack rat
 template pins in §3, no change to any definition, no results existed); D-087 (the placebo arm's generation count, arithmetic
 only, no results existed); D-088 (the Gate B review's findings: NI-3 and NI-4 added to §6.5, the hijack basis and two reporting rules
 added, a halted plan keeps its planned effects; no registered rate changes, no results existed); D-090 (the stop rule in §9, fresh decision seeds in §3,
-the hijack basis labelled post-hoc, the not-held-out flag in §10; the first pilot's results existed and stay reported).
+the hijack basis labelled post-hoc, the not-held-out flag in §10; the first pilot's results existed and stay reported); D-091 (`plan_v2` in §3; the first
+pilot's results existed and stay reported).
 
 ## 13. Open before the pilot
 

@@ -15,7 +15,15 @@ from pathlib import Path
 from typing import Any
 
 from evals.harness import injections
-from evals.llm_pins import MAX_TOKENS, MODELS, PILOT_SEEDS, PILOT_TASKS, SETTINGS, ModelPin
+from evals.llm_pins import (
+    MAX_TOKENS,
+    MODELS,
+    PILOT_COMPARISON_SEEDS,
+    PILOT_SEEDS,
+    PILOT_TASKS,
+    SETTINGS,
+    ModelPin,
+)
 from evals.llm_score import ni_oracles, run_instance
 from evals.tasks.dev import USER_TASKS
 from evals.yardstick import correct, parse_text, reads_untrusted
@@ -65,7 +73,9 @@ def go_no_go(*, valid: int, correct: int, capacity_passes: bool, stop: bool = Fa
     return not stop and valid >= MIN_VALID and correct >= MIN_CORRECT and capacity_passes
 
 
-def score_pilot(pin: ModelPin, records: list[dict[str, Any]]) -> dict[str, Any]:
+def score_pilot(
+    pin: ModelPin, records: list[dict[str, Any]], seeds: tuple[int, ...] = PILOT_SEEDS
+) -> dict[str, Any]:
     """Each of the 15 instances by replay: a missing key raises and stops the report. Every count
     comes from the record the replay matched, so no plan is scored under another input."""
     by_task: dict[str, dict[str, int]] = {}
@@ -76,7 +86,7 @@ def score_pilot(pin: ModelPin, records: list[dict[str, Any]]) -> dict[str, Any]:
     for name in PILOT_TASKS:
         task = TASKS[name]
         row = by_task.setdefault(name, {"valid": 0, "correct": 0})
-        for seed in PILOT_SEEDS:
+        for seed in seeds:
             replay = ReplayPlanner(pin.sha256, pin.template, seed, records)
             instance = run_instance(task, None, "warrant", replay, f"{name}:-:warrant+llm:{seed}")
             outcomes[instance.outcome] = outcomes.get(instance.outcome, 0) + 1
@@ -136,7 +146,11 @@ def report(pin: ModelPin, raw: Path) -> dict[str, Any]:
     records = [json.loads(line) for line in lines]
     measured = json.loads((raw / "measured.json").read_text(encoding="utf-8"))
     score = score_pilot(pin, records)
-    costs = _costs(records)
+    # Compared with plan_v1 only: these seeds decide nothing, but a broken oracle is a stop (D-090).
+    comparison = score_pilot(pin, records, PILOT_COMPARISON_SEEDS)
+    stop = bool(score["stops"] or comparison["stops"])
+    decision = [r for r in records if r["seed"] in PILOT_SEEDS]
+    costs = _costs(decision)
     lengths = json.loads((raw / "prompt_lengths.json").read_text(encoding="utf-8"))
     overhead = float(measured["load_seconds"]) + float(
         (raw / "build_seconds.txt").read_text(encoding="utf-8")
@@ -157,9 +171,10 @@ def report(pin: ModelPin, raw: Path) -> dict[str, Any]:
         job_overhead_seconds=overhead,
     )
     longest = max(every)
-    latency = [r["latency_seconds"] for r in records]
+    latency = [r["latency_seconds"] for r in decision]
     return {
         "score": score,
+        "comparison_seeds": comparison,
         "latency_seconds": {
             "min": min(latency),
             "median": percentile(latency, 50),
@@ -176,9 +191,9 @@ def report(pin: ModelPin, raw: Path) -> dict[str, Any]:
             valid=score["valid"],
             correct=score["correct"],
             capacity_passes=observed["passes"],
-            stop=bool(score["stops"]),
+            stop=stop,
         ),
-        "stop": bool(score["stops"]),
+        "stop": stop,
         "measured": measured,
     }
 
