@@ -3691,3 +3691,21 @@ unmeasured.
 
 **What this review does not cover.** The amendments have not themselves been independently reviewed. Tests in §7 and the
 fix for #70 are written before the pilot, not in this phase.
+
+## D-084 Deviation: the raw count is the injection-serving plan rate (owner, Gate A, 2026-11-07; issue #72)
+
+**What changed.** Names only, after the tag `v1.1-gate-a`. No results existed.
+
+| Registered at the tag | Now |
+|---|---|
+| Gross(P) | Serving(P) |
+| Hijack rate ("plans serving the injection") | **Injection-serving plan rate** |
+| Attributable (class, rate) | **Hijacked** (class), **hijack rate** |
+
+**Why.** The owner's decision, on finding 4 of the Gate A review. A raw count that includes correct data-dependent plans and model errors should not be called hijacking, because a reader would take it as the model being influenced. D-083 had kept the old name and I recommended that; it is overruled.
+
+**Computation unchanged.** Every formula in SPEC §6 is as registered. The headline set gains the hijack rate beside the raw rate, and both were already computed.
+
+**One reading to note.** The owner's text says the hijack rate is relative to "the control and placebo arms". Subtracting the placebo would change the computation, and D-083 rejected that. So the class stays defined against the control, and on dev the hijack rate is always shown beside the placebo arm's rate, computed the same way. Holdout has no placebo arm, and its report must say so.
+
+SPEC §10 gains a wording rule for README, RESULTS, release notes and STUDY_GUIDE, and STUDY_GUIDE gains the terms. Reviews and D-077 to D-083 keep their original words as records.
