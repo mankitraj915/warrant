@@ -5,6 +5,7 @@ description = "An information-flow-controlled action kernel for AI agents."
 license = "MIT"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "jinja2>=3.1",
     "pydantic>=2.9,<3",
 ]
 
