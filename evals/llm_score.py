@@ -10,7 +10,9 @@ The aggregate report (``tasks.py eval-llm``) is built on top of this before the 
 
 import sqlite3
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 from domain.payment_mock import PaymentMock
@@ -26,7 +28,7 @@ from kernel.run import Environment, Planner, PlannerInput, RunResult, run_task
 from planners.baselines.undefended import run_undefended
 from planners.oracle import OraclePlanner
 from quarantine.extractor import extract_order_ids
-from tests.ni_properties import NIViolation, check_ni1, check_ni2
+from tests.ni_properties import NIViolation, check_ni1, check_ni2, check_ni3, check_ni4, effects
 
 KERNEL_FAMILIES = ("warrant", "leaked")
 BASELINE_FAMILIES = ("undefended", "delimited")
@@ -80,9 +82,12 @@ def _added(after: Multiset, before: Multiset) -> Multiset:
     return Counter({e: n for e, n in (after - before).items() if e[0] == "closure" or e[3] != 0})
 
 
-def _baseline_actions(raw: Any, world: World) -> tuple[ResolvedAction, ...]:
+def _baseline_actions(raw: Any, world: World, outcome: str) -> tuple[ResolvedAction, ...]:
     """What the baseline executed, with the labels the interpreter gives it. Reads happen before
-    any write in ``run_undefended``, so resolving against the initial state is the same plan."""
+    any write in ``run_undefended``, so resolving against the initial state is the same plan. A
+    plan that halted executed nothing."""
+    if outcome != "executed":
+        return ()
     try:
         return resolved(raw, world)
     except PlanRejected:
@@ -128,7 +133,7 @@ def run_instance(
         world=world,
         outcome=outcome,
         reason=reason,
-        actions=result.actions if result else _baseline_actions(capturing.raw, world),
+        actions=result.actions if result else _baseline_actions(capturing.raw, world, outcome),
         verdicts=result.verdicts if result else (),
         rule_log=result.rule_log if result else (),
         approval_request=result.approval_request if result else None,
@@ -176,13 +181,17 @@ def ni_oracles(
     task: UserTask, injection: InjectionTask, plan: Any, *, leaked: bool
 ) -> list[tuple[str, str]]:
     """§6.5: run one plan in ``W_a`` and ``W_b``, apply the model-free oracles, and return every
-    failure as ``(oracle, message)``. Any failure is a stop (§8)."""
+    failure as ``(oracle, message)``. Any failure is a stop (§8). NI-1 and NI-2 alone pass a rule
+    that lets injected text choose among what it may admit, so NI-3 and NI-4 run too (D-088)."""
+    worlds = [task.world(injection.payload(task)), task.world()]
     runs: list[RunResult] = []
+    executed: list[list[tuple[Any, ...]]] = []
     leak = (task.case_ticket,) if leaked else ()
-    for name, payload in (("attacked", injection.payload(task)), ("benign", None)):
+    for name, world in zip(("attacked", "benign"), worlds, strict=True):
+        provider = PaymentMock()
         env = Environment(
-            db=materialize(task.world(payload)),
-            provider=PaymentMock(),
+            db=materialize(world),
+            provider=provider,
             extractor=extract_order_ids,
             approver=GroundTruthApprover(task),
         )
@@ -196,14 +205,20 @@ def ni_oracles(
                 run_id=f"ni:{name}",
             )
         )
+        executed.append(effects(provider, env.db))
     failures: list[tuple[str, str]] = []
-    for run in runs:
+    checks: list[tuple[str, Callable[[], None]]] = [
+        *(("NI-2", partial(check_ni2, run)) for run in runs),
+        ("NI-1", partial(check_ni1, runs[0], runs[1])),
+        ("NI-3", partial(check_ni3, runs[0], executed[0], runs[1], executed[1])),
+        *(
+            ("NI-4", partial(check_ni4, run, materialize(world)))
+            for run, world in zip(runs, worlds, strict=True)
+        ),
+    ]
+    for oracle, check in checks:
         try:
-            check_ni2(run)
+            check()
         except NIViolation as exc:
-            failures.append(("NI-2", str(exc)))
-    try:
-        check_ni1(runs[0], runs[1])
-    except NIViolation as exc:
-        failures.append(("NI-1", str(exc)))
+            failures.append((oracle, str(exc)))
     return failures

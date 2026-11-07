@@ -5,7 +5,9 @@ flushed as it is written, and a key already in the file is skipped, so a job can
 re-run, and a written record stays final. A process that generates a ``warrant`` plan refuses any
 job carrying ticket text, so that plan cannot depend on injected text through retained model state.
 
-Usage: ``python -m evals.llm_generate pilot --model granite --model-path FILE --out DIR``.
+Usage: ``python -m evals.llm_generate pilot --model granite --model-path FILE --out DIR``. The
+full design's prompts carry ticket text, so tokenizing them is its own mode and its own process:
+``python -m evals.llm_generate lengths ...``.
 """
 
 import argparse
@@ -36,6 +38,8 @@ from kernel.run import PlannerInput
 from planners.llm_local import LocalModel, generation_key, render_messages, render_prompt
 
 TASKS = {t.id: t for t in USER_TASKS}
+# What this process has generated from: a warrant job, or a job carrying ticket text (§5).
+_PROCESS_SAW: set[str] = set()
 
 
 class MemoryRefused(Exception):
@@ -126,13 +130,12 @@ def full_design(template: str, *, full: bool) -> list[Job]:
 def generate(
     model: Model, pin: ModelPin, jobs: list[Job], out: Path, *, reset: bool = True
 ) -> None:
-    if any(j.family == "warrant" for j in jobs) and any(j.planner_input.context for j in jobs):
+    saw = _PROCESS_SAW | {"warrant" for j in jobs if j.family == "warrant"}
+    saw |= {"ticket text" for j in jobs if j.planner_input.context}
+    if len(saw) > 1:
         raise ValueError("warrant plans are generated in their own process, with no ticket text")
-    done: set[tuple[str, str, int]] = set()
-    if out.exists():
-        for line in out.read_text(encoding="utf-8").splitlines():
-            model_sha, prompt_sha, seed = json.loads(line)["key"]
-            done.add((model_sha, prompt_sha, seed))
+    _PROCESS_SAW.update(saw)
+    done = _written_keys(out)
     with out.open("a", encoding="utf-8") as sink:
         for job in jobs:
             prompt = render_prompt(render_messages(job.planner_input), pin.template)
@@ -146,6 +149,8 @@ def generate(
                 "seed": job.seed,
                 "family": job.family,
                 "task": job.task,
+                # The first pair with this key: others may share it (§4), so per-injection
+                # counts come from the pair being replayed, never from this field.
                 "injection": job.injection,
                 **result,
             }
@@ -153,6 +158,22 @@ def generate(
             sink.flush()
             os.fsync(sink.fileno())
             done.add(key)
+
+
+def _written_keys(out: Path) -> set[tuple[str, str, int]]:
+    """Keys already written. A job killed mid-write leaves a torn last line: it is no record, so
+    it is removed and that key is generated again (§3)."""
+    if not out.exists():
+        return set()
+    text = out.read_text(encoding="utf-8")
+    complete, newline, torn = text.rpartition("\n")
+    if torn:
+        out.write_text(complete + newline, encoding="utf-8")
+    keys = set()
+    for line in complete.splitlines():
+        model_sha, prompt_sha, seed = json.loads(line)["key"]
+        keys.add((model_sha, prompt_sha, seed))
+    return keys
 
 
 def available_memory_bytes() -> int:
@@ -224,6 +245,7 @@ def _peak_memory_kib() -> int | None:
 
 
 def pilot(name: str, model_path: Path, out: Path) -> int:
+    """Generation and its measurements, with no ticket text anywhere in this process."""
     refuse_without_memory(available_memory_bytes())
     pin = MODELS[name]
     out.mkdir(parents=True, exist_ok=True)
@@ -238,7 +260,6 @@ def pilot(name: str, model_path: Path, out: Path) -> int:
         "grammar_conversion_seconds": model.grammar_conversion_seconds,
         "grammar_native_overhead_seconds": model.grammar_native_overhead(),
         "determinism": determinism_check(model, jobs, pin.template),
-        "prompt_lengths": prompt_lengths(model, pin.template),
         "run_seconds": time.monotonic() - started,
         "peak_memory_kib": _peak_memory_kib(),
     }
@@ -246,14 +267,25 @@ def pilot(name: str, model_path: Path, out: Path) -> int:
     return 0
 
 
+def lengths(name: str, model_path: Path, out: Path) -> int:
+    """§9: the tokenized length of every prompt in the full design. Nothing is generated."""
+    refuse_without_memory(available_memory_bytes())
+    pin = MODELS[name]
+    out.mkdir(parents=True, exist_ok=True)
+    found = prompt_lengths(LocalModel(model_path, pin.template), pin.template)
+    (out / "prompt_lengths.json").write_text(json.dumps(found), encoding="utf-8")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=["pilot"])
+    parser.add_argument("mode", choices=["pilot", "lengths"])
     parser.add_argument("--model", choices=sorted(MODELS), required=True)
     parser.add_argument("--model-path", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
-    return pilot(args.model, args.model_path, args.out)
+    mode = pilot if args.mode == "pilot" else lengths
+    return mode(args.model, args.model_path, args.out)
 
 
 if __name__ == "__main__":

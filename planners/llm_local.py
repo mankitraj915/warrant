@@ -94,6 +94,7 @@ class ReplayPlanner:
         self._template = template
         self._seed = seed
         self._records: dict[Key, Mapping[str, Any]] = {}
+        self.matched: Mapping[str, Any] | None = None  # the record the last plan() used
         for record in records:
             model, prompt, record_seed = record["key"]
             key = (str(model), str(prompt), int(record_seed))
@@ -107,6 +108,7 @@ class ReplayPlanner:
         record = self._records.get(key)
         if record is None:
             raise MissingGeneration(f"no generation for {key}")
+        self.matched = record
         output = str(record["output"])
         if record["stop_reason"] != "stop":
             return output
