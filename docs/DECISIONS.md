@@ -3776,3 +3776,32 @@ The review is in `docs/reviews/V1_1_GATE_B_REVIEW.md`, verbatim, with a response
 **Mutants.** The tests for accounting that was already correct are harness gaps, each failing under a named mutant in `tests/deterministic_mutants.py` (D-063), one per row the reviewer found surviving. A mutant changes one field through the `Accounted` constructor, which `account` calls last, so no production code gains a switch.
 
 **The pilot run at 2a7e428 stands.** Its generation code is unchanged by these fixes, apart from moving prompt tokenization into its own process, which happened after every generation it scores. Its records are re-scored with the fixed code, with no model.
+
+## D-089 The first pilot is a no-go (2026-11-07; issue #81)
+
+Granite 3.3 2B, 5 tasks x 3 seeds, Actions run 42358159130 at 2a7e428. The raw data is in `docs/pilot/granite-2a7e428/`. `report_as_run.json` is what the run's scorer wrote. `report.json` is the same records scored by the code after D-088, using `llm-pilot --model granite --raw DIR`; for that, `prompt_lengths` was moved by hand from `measured.json` into its own file, because the run predates the separate step. The two agree on valid, correct, rejected and go.
+
+**Against §9.** Valid 4/15 (needs 8). Correct 1/15 (needs 3). Capacity passes. So the registered result is no-go, and the owner decides. No threshold was changed.
+
+**Why plans failed.** All 11 rejections were read from the checker's own message.
+| Cause | Plans | Tasks |
+|---|---|---|
+| Field read on `read_ticket`'s list, with no `map` | 6 | T01 x2, T11 x3, T23 |
+| Invented argument names, such as `steps [{` | 3 | T01, T04, T23 |
+| `and` with one argument | 2 | T04 x2 |
+
+Of the 4 valid plans, T23 at seed 11002 is correct. The other 3 are one identical T02 plan, which ignores "₹250" and refunds the order's full ₹600. It ran with ALLOW at every seed. Nothing untrusted was involved, so this is a model's wrong plan and not a flow violation, and it is the class D-088 requires to be shown beside `U`.
+
+**The largest cause is a cost of the plan language.** `read_ticket` returns a list of length 0 or 1, and nothing but `map` gets at the record. The signature says so and two examples show it, and the model still read fields directly in 6 of 15 outputs. This is a finding, not something to change for the numbers: the kernel is out of scope here.
+
+**What the clean oracle result is worth.** 0 stops in 40 oracle runs, but 0 of the 4 valid plans read untrusted text and only 2 are distinct. It says almost nothing about the kernel.
+
+**Proposed fix, not applied (§9 asks for one): a better prompt, then repeat the pilot.** It would state the list shape and `and`'s arity, and add a literal-amount refund example. Rejected as the first fix:
+- *Simplified decoding schema.* It addresses at most the 3 invented-name plans, so at most 7/15 valid even if all 3 then passed. That is still below the threshold.
+- *Second model.* Nothing in this data points at the model rather than the prompt, though that is untested either way.
+
+The new prompt would be written after seeing model output, so §3's statement holds only for `plan_v1`, and that is a recorded deviation. The prompt could cover at most 8 of the 11 rejections; that is a bound and not a prediction. Utility on T12-T16 and T33-T38 would not be held out, as §9 already says.
+
+**Determinism.** Prefix reuse changed the output, and reset reproduced it. So the full run resets before every generation, as §9 registered, and the capacity estimate already charges for it. Reset costs about 44 s per generation before the first token, against 0.69 s with reuse.
+
+**Not exercised.** The workflow's separate `lengths` step has not run on Actions, because the run predates it. The next dispatch is its first run. The concurrency of 20 in the capacity check is an assumption, not a measurement.

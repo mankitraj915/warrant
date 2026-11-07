@@ -87,8 +87,10 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
   `tests/deterministic_mutants.py`, D-063; it lists tests changed in place and new mutants, and
   refuses uncommitted changes under `tests/`, D-073), and the manual
   `owner-stages.yml` (`gh workflow run owner-stages.yml -f stage=d`), which uploads results.
-- `llm-generate pilot --model NAME --model-path FILE --out DIR` and `llm-pilot --model NAME --raw DIR`:
-  the pilot's generation and its model-free report (SPEC_v1.1 §9). Generation needs the `llm` extra
+- `llm-generate pilot --model NAME --model-path FILE --out DIR`, `llm-generate lengths ...` (tokenizes
+  the design's prompts in their own process, D-088) and `llm-pilot --model NAME --raw DIR`: the pilot's
+  generation and its model-free report (SPEC_v1.1 §9). The first pilot's data is in
+  `docs/pilot/granite-2a7e428/` (D-089). Generation needs the `llm` extra
   and runs only on Actions: `gh workflow run llm-run.yml -f model=granite`, which uploads the records.
 - `eval-llm`: evaluation with a local model. Not built yet (D-074); v1.1 builds it as
   `eval-llm --raw DIR`, scoring raw generations with no model (D-077, D-080).
@@ -102,11 +104,14 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 
 ## Current status
 
-**Now: v1.1, Phase B (pilot), working toward ⛔ Gate B.** Gate A passed (owner, 2026-11-07): tag
+**Now: v1.1, stopped at ⛔ Gate B, waiting for the owner.** The first pilot is a no-go: 4/15 valid,
+1/15 correct, capacity passes, no oracle stop (run 42358159130, D-089). No fix has been applied, and the
+full run has not started. Tag `v1.1-gate-b` only after the owner decides. `eval-llm` is still not built.
+Gate A passed (owner, 2026-11-07): tag
 `v1.1-gate-a` at 3741310; the raw count is the "injection-serving plan rate" and "hijack rate" is
 reserved for the attributable class (D-084). #70 is fixed (D-085). The instrument is calibrated in
 `check` with no model (`tests/test_calibration.py`, `evals/yardstick.py`, `evals/llm_score.py`,
-`planners/llm_local.py`; D-086). No model has been run. The owner's brief (2026-11-06) commits to
+`planners/llm_local.py`; D-086). The Gate B review's findings are fixed (D-088). The owner's brief (2026-11-06) commits to
 two releases:
 - **v1.1, a real model as the planner:** B pilot on Actions, 5 tasks x 3 seeds, its own issue and
   branch, ⛔ go/no-go. **Gate B condition from the owner:** before the full run, a fresh reviewer
