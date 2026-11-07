@@ -3719,3 +3719,23 @@ SPEC §10 gains a wording rule for README, RESULTS, release notes and STUDY_GUID
 **Regression tests.** `tests/test_ni2_rule_preconditions.py`. The two run-level tests apply the existing mutants and fail on base with "DID NOT RAISE", since the oracle is the code under test (D-066). The amount and reason cases build the run directly, because no cheap well-typed plan taints only those. The clean kernel was never affected, and the mutant was already caught by other properties.
 
 **Why now.** SPEC_v1.1 §6.5 applies this oracle to real model plans, and a stop rule depends on it. Rejected: *leaving NI-2 and relying on the yardstick*, since the review showed the two need to be independent.
+
+## D-086 Plan: the yardstick, replay and the §7 calibration (2026-11-07; issue #75)
+
+**Files.** `tests/test_calibration.py` comes first: the 12 items of SPEC_v1.1 §7, the model-free P2 test (§8) and the placebo payload. Then `evals/yardstick.py` (the §6 definitions: effects as multisets, `F`, targets, Serving, classes, `R`, `U`, strict, rule-released, collapsed), `evals/llm_score.py` (one instance through `run_task` or `run_undefended`, the §6.5 oracles, §6.6 stopped-how), and `planners/llm_local.py` with `render_messages`, `render_prompt`, `generation_key` and `ReplayPlanner`. The kernel, policy, rules and existing harness do not change.
+
+**Interfaces.** `planned(plan, world) -> Counter`, `Pair(task, injection)`, `serving(pair, plan)`, `attribute(pair, text, control_text)`, `releases(family, task, world, actions, rule_log)`, `account(...)`. Generation and scoring both go through `render_prompt`, so the key is computed one way.
+
+**Chat templates are committed, not read at scoring time.** SPEC §3 has each model's own template, read from its GGUF, render the messages, and §5 has scoring run with no model. So scoring needs the template without the 1.5 GB file. The two templates were read from the pinned files' metadata with an HTTP range request, without downloading any weights, and are committed byte for byte as `planners/prompts/chat_templates/`. The pilot workflow compares the loaded GGUF's `tokenizer.chat_template` with these bytes and stops on a mismatch. Rejected: *storing the rendered prompt in each record and trusting it*, since the replay's point is to prove the kernel's input is what the model saw; *hand-written renderers*, which could drift from the template; *reading templates from a manifest beside the raw records*, which makes re-scoring depend on the data being checked.
+
+**`jinja2` becomes a project dependency.** Rendering a template needs it, in `check` and when anyone re-scores offline. `llama-cpp-python` requires it anyway. It is imported by `planners/`, never by `kernel/`. The environment matches llama-cpp-python's own formatter (`ImmutableSandboxedEnvironment`, `trim_blocks`, `lstrip_blocks`), and no `strftime_now` is provided, so a template path that would put today's date in a prompt raises instead of varying.
+
+**Readings of the spec that the code has to fix, none changing a definition.**
+- Placebo text is comma-and-space separated (`5000, 999`). §4 says "comma-separated".
+- A "no-op plan" in §7 item 7 is a single `read_ticket` of the case ticket, because the plan language requires at least one step.
+- A halted resolution has no planned effects: `F` is empty.
+- §7 item 10's "predicate that disagrees" is raised for an admission with a trusted ticket whose effect fails the predicate for that ticket. The case-ticket condition then decides membership separately, because a rule may correctly admit on a ticket that is not the task's case ticket.
+- §6.6 lists how a Serving instance ended. It gives no bucket for a plan that executed without approval or release (a trusted wrong literal that policy allows), so the code adds "executed, trusted": it must be visible, not dropped.
+- The exposure denominator (§6.6) uses labels resolved under the operator's plan label in both configurations. Otherwise every literal in `leaked+llm` carries the plan label, and every plan would count as reading untrusted text.
+
+**What "fails on the current code" means here.** On base these tests fail at collection, because the modules do not exist, and `new_tests_fail_on_base.py` reports that separately for this reason: their assertions never ran. So that is weak evidence on its own. The evidence that each item can fail is a run against two null instruments, one that always answers no and one that always answers yes, reported per test in the PR.

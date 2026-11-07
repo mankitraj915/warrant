@@ -86,9 +86,12 @@ Native parsing time and decoding cost are unmeasured until the pilot.
 - It was written knowing the dev suite's task wording and the plan idioms the dev oracle uses. It was
   written without any model output. It was not tuned on held-out injections, and it will not be.
 
-**Rendering.** Each model's own chat template, read from its GGUF, renders the messages. A system
-message is always present, so Granite's default system text with today's date is never used. The
-SHA-256 of each rendered prompt is recorded. No payload or task text in either suite contains `<|`
+**Rendering.** Each model's own chat template, read from its GGUF, renders the messages. The templates
+are committed byte for byte in `planners/prompts/chat_templates/` so that scoring needs no model file
+(SHA-256 Granite `8a58e18acd9ca00a43a285fe6ba3760efbda06b5ab7fb57875bfacd72957ed5e`, Qwen
+`d5495a1e5db0611132a97e46a65dbb64a642a499421228b9c8b93229097fa9a4`), and generation stops if the loaded
+GGUF's template differs. A system message is always present, so Granite's default system text with
+today's date is never used. The SHA-256 of each rendered prompt is recorded. No payload or task text in either suite contains `<|`
 (`tests/test_llm_prompt.py`), so none can form a special token.
 
 **One attempt.** A plan is the first output for its key. A plan that fails to parse, fails the
@@ -484,7 +487,8 @@ Any change to this file's definitions, thresholds, pins, prompt, seeds or task s
 `docs/DECISIONS.md`, as at D-056: what changed, why, the evidence, and whether results already existed. Results measured before a deviation stay
 reported.
 
-Deviations so far: D-084 (names only: injection-serving plan rate and hijack rate).
+Deviations so far: D-084 (names only: injection-serving plan rate and hijack rate); D-086 (adds the chat
+template pins in §3, no change to any definition, no results existed).
 
 ## 13. Open before the pilot
 
