@@ -3805,3 +3805,31 @@ The new prompt would be written after seeing model output, so §3's statement ho
 **Determinism.** Prefix reuse changed the output, and reset reproduced it. So the full run resets before every generation, as §9 registered, and the capacity estimate already charges for it. Reset costs about 44 s per generation before the first token, against 0.69 s with reuse.
 
 **Not exercised.** The workflow's separate `lengths` step has not run on Actions, because the run predates it. The next dispatch is its first run. The concurrency of 20 in the capacity check is an assumption, not a measurement.
+
+## D-090 Deviation: the stop rule for the pilot, registered before the revised prompt (owner, Gate B, 2026-11-07; issue #83)
+
+**What changed.** The first pilot's results existed (D-089) and stay reported. The revised prompt did not exist when this was merged.
+
+| Registered before | Now |
+|---|---|
+| §9: propose one fix, "the pilot may then be repeated", with no limit on repeats | One prompt revision, then one Qwen attempt on it, then stop and report a negative result |
+| §3: pilot seeds 11001–11003 | Decision seeds 11101–11103 for the repeat. 11001–11003 run again as a comparison with `plan_v1`, never for the decision |
+| §6.3: hijack basis listed among the rates (D-088) | Same computation, labelled post-hoc with its reason, directly beside the registered rates |
+| §10: reporting | Also flags utility on the pilot tasks and tasks closely resembling them as not held out |
+
+**Why a limit.** Without one, a prompt could be revised until the thresholds passed, and the go decision would then measure the revising rather than the model. Fresh seeds stop the decision resting on outputs the revision was written from. They do not make the tasks held out, because the same five tasks are used.
+
+**Decisions the owner made, against my recommendations.**
+- I recommended using 11001–11003 for the decision. Rejected: the revision is written from those seeds' outputs. They are kept only as the comparison.
+- I recommended leading with the target-matched figure (H2). Rejected: the registered injection-serving and hijack metrics stay the headline. Choosing the headline after seeing that one measure was flawed is what pre-registration exists to prevent, so the split sits beside them and is labelled post-hoc.
+
+**Confirmed.** The hijack class is relative to the control, and the placebo is shown beside it and not subtracted. That is what §6.3 already says, and the owner's Gate A wording is read this way (Gate B, item 4).
+
+**My readings of the rule, for the owner to correct.**
+- An attempt fails on valid or correct only. A capacity failure goes back to the owner, as §9 had it.
+- An oracle failure on any seed is a §8 stop, comparison seeds included. Those seeds do not decide go or no-go, but a real plan breaking an oracle is a kernel finding wherever it came from.
+- A job that dies before its records are complete is not an attempt. Otherwise an infrastructure fault could use up the one revision.
+- The Qwen attempt uses the same seeds. The job also generates the comparison seeds there, since that needs no separate code path; those records are reported and are not a comparison with `plan_v1`, because `plan_v1` was never run on Qwen.
+- The not-held-out flag covers tasks resembling any pilot task, not only T11, because the revision responds to all five tasks' outputs. This goes further than the owner's wording and only ever marks more tasks as not held out. RESULTS names the tasks.
+
+If Qwen passes, §1 already says it takes the primary's full scope and Granite is not run.

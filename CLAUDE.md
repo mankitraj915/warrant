@@ -104,9 +104,11 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 
 ## Current status
 
-**Now: v1.1, stopped at ⛔ Gate B, waiting for the owner.** The first pilot is a no-go: 4/15 valid,
-1/15 correct, capacity passes, no oracle stop (run 42358159130, D-089). No fix has been applied, and the
-full run has not started. Tag `v1.1-gate-b` only after the owner decides. `eval-llm` is still not built.
+**Now: v1.1, Phase B, repeating the pilot under the owner's stop rule (SPEC_v1.1 §9, D-090).** The first
+pilot was a no-go: 4/15 valid, 1/15 correct, capacity passes, no oracle stop (run 42358159130, D-089). One
+prompt revision only. If the repeat fails, one Qwen attempt on that prompt. If that fails, the model work
+stops and v1.1 is reported as a negative result. Tag `v1.1-gate-b` only after a repeat passes. Stop at ⛔
+Gate B after the repeat. The full run has not started, and `eval-llm` is still not built.
 Gate A passed (owner, 2026-11-07): tag
 `v1.1-gate-a` at 3741310; the raw count is the "injection-serving plan rate" and "hijack rate" is
 reserved for the attributable class (D-084). #70 is fixed (D-085). The instrument is calibrated in
