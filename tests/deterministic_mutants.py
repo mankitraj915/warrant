@@ -14,6 +14,7 @@ from collections import Counter
 from dataclasses import replace
 from typing import Any
 
+import evals.llm_pilot
 import evals.llm_score
 import evals.tasks.dev
 import evals.yardstick
@@ -43,6 +44,12 @@ def _origins_without_row(ticket: int) -> set[str]:
 
 
 _Accounted = evals.yardstick.Accounted
+_score_pilot = evals.llm_pilot.score_pilot
+
+
+def _score_without_stops(*args: Any, **kwargs: Any) -> Any:
+    """Gate B re-review, M4: an oracle failure does not reach the pilot's stops."""
+    return {**_score_pilot(*args, **kwargs), "stops": []}
 
 
 def _accounted_with(**changes: Any) -> Any:
@@ -115,4 +122,6 @@ DETERMINISTIC_MUTANTS: dict[str, tuple[Any, str, Any]] = {
     "E ignores the initial state": (evals.llm_score, "_added", _ignoring_before),
     # Gate B review, M8: the pinned list of pairs whose attack plan is not Serving.
     "planned effects are empty": (evals.yardstick, "planned", lambda plan, world: Counter()),
+    # Gate B re-review, M4.
+    "oracle failures are not stops": (evals.llm_pilot, "score_pilot", _score_without_stops),
 }

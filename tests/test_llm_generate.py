@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 import evals.llm_generate
+import evals.llm_pilot
 from evals.llm_generate import (
     Job,
     MemoryRefused,
@@ -497,6 +498,42 @@ def test_the_pilot_job_generates_both_seed_sets_and_checks_determinism_on_the_de
     assert {r["seed"] for r in records} == {*PILOT_SEEDS, *PILOT_COMPARISON_SEEDS}
     measured = json.loads((tmp_path / "measured.json").read_text(encoding="utf-8"))
     assert measured["determinism"]["same_with_reset"] is True
+
+
+# ---- The Gate B re-review (docs/reviews/V1_1_GATE_B_REREVIEW.md). -------------------------
+
+
+@pytest.mark.harness_gap("oracle failures are not stops")
+def test_rereview_m4_a_real_oracle_failure_reaches_the_stop_and_the_go(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing is stubbed between ``ni_oracles`` and the report's answer."""
+    monkeypatch.setattr(
+        "evals.llm_pilot.ni_oracles", lambda *_args, **_kwargs: [("NI-1", "broken")]
+    )
+    result = evals.llm_pilot.report(MODELS["granite"], _raw(tmp_path))
+    assert result["score"]["stops"]
+    assert result["stop"] is True
+    assert result["go"] is False
+
+
+@pytest.mark.parametrize("character", ["\u2028", "\u0085"])
+def test_rereview_m1_a_line_separator_in_an_output_leaves_the_records_readable(
+    tmp_path: Path, character: str
+) -> None:
+    class Separating(FakeModel):
+        def generate(self, prompt: str, seed: int, *, reset: bool = True) -> dict[str, Any]:
+            return {**super().generate(prompt, seed, reset=reset), "output": f"a{character}b"}
+
+    raw = _raw(tmp_path)
+    out = raw / "records.jsonl"
+    out.unlink()
+    jobs = [*pilot_jobs(), *pilot_jobs((11001, 11002, 11003))]
+    generate(Separating(), MODELS["granite"], jobs[:2], out)
+    generate(Separating(), MODELS["granite"], jobs, out)
+    result = evals.llm_pilot.report(MODELS["granite"], raw)
+    assert result["score"]["rejected"] == 15
+    assert out.read_text(encoding="utf-8").count("\n") == 30
 
 
 def test_capacity_counts_each_jobs_load_and_build_time() -> None:

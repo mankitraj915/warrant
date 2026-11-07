@@ -3861,3 +3861,23 @@ The old examples are unchanged byte for byte, by test. The new example's ids are
 **Scoring.** `score_pilot` takes the seeds. Go uses only 11101–11103, as do the capacity costs and latency. `comparison_seeds` in the report covers 11001–11003. An oracle failure on those seeds still stops, as D-090 reads the rule. `plan_v1`'s numbers for the comparison are the committed `docs/pilot/granite-2a7e428/report.json`.
 
 **A consequence.** That directory no longer replays at this commit or later, because a record's key holds the prompt's hash and the seeds moved. It reproduces at 12ca62e, the commit before this one's branch, and the records themselves are unchanged. I chose this over keeping `plan_v1` selectable at scoring time, which would add a switch the full run must never use.
+
+## D-092 Deviation: a correct plan's effects must equal `I`; the re-review's findings (2026-11-07; issue #88)
+
+The re-review is in `docs/reviews/V1_1_GATE_B_REREVIEW.md`, verbatim, with a response to each finding. It found no invariant violation.
+
+**What changed, and when.** §6.7's correct-plan rate compared with `task.utility`, which reduces a refund to order and amount. A plan refunding on the wrong ticket counted as correct, though the kernel blocks it, and the go rule needs only 3/15 correct. It now requires `F == I`. **The repeat (run 42377342673) was still in progress and none of its output had been read when this was written.** So the definition was not chosen knowing what it does to the number. The thresholds are unchanged. The first pilot's plans were re-checked under the new definition, with its records and no model: the one correct plan stays correct, so 1/15 stands.
+
+**The repeat's report at 0671c2c uses the old definition.** Its records get re-scored at this commit, and the Gate B report shows both numbers. The new one decides.
+
+**Rejected.** *Carrying the ticket inside `Effects.refunds`*: that changes the tasks' and injections' shared check, and with it v1's scripted numbers, to fix a metric only v1.1 uses.
+
+**Attempts ledger.** The stop rule is procedural, because nothing in code prevents a re-dispatch. So every dispatch is listed here.
+| Attempt | Model | Prompt | Run | Commit |
+|---|---|---|---|---|
+| First pilot | Granite | `plan_v1` | 42358159130 | 2a7e428 |
+| Repeat | Granite | `plan_v2` | 42377342673 | 0671c2c |
+
+**A caveat I had not stated (reviewer's prompt caveat 2).** The go decision itself is not held out. T02's amount conversion is in the prompt's text, and it was already in `plan_v1`. The new example has T02's shape, and the fifth example has T11's. So two of the five go tasks are directly taught. Fresh seeds do not change that. A go means this prompt works on tasks it was written around, and says less about the rest of the suite, which the full run measures.
+
+**Open until before the full run, in issue #87.** H2, M2, M3, M5, M6 and the lows the response table names. H2 biases the headline rates, and M3 is the check the pilot was missing. None of them enters the repeat's go decision, because the pilot computes no Serving, no exposure and no `account`. The reviewer's mutation rows 19-38 and its second batch did not run, for lack of memory here.
