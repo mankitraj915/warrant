@@ -87,6 +87,9 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
   `tests/deterministic_mutants.py`, D-063; it lists tests changed in place and new mutants, and
   refuses uncommitted changes under `tests/`, D-073), and the manual
   `owner-stages.yml` (`gh workflow run owner-stages.yml -f stage=d`), which uploads results.
+- `llm-generate pilot --model NAME --model-path FILE --out DIR` and `llm-pilot --model NAME --raw DIR`:
+  the pilot's generation and its model-free report (SPEC_v1.1 §9). Generation needs the `llm` extra
+  and runs only on Actions: `gh workflow run llm-run.yml -f model=granite`, which uploads the records.
 - `eval-llm`: evaluation with a local model. Not built yet (D-074); v1.1 builds it as
   `eval-llm --raw DIR`, scoring raw generations with no model (D-077, D-080).
 - `report`: regenerate `docs/RESULTS.md`. Not in v1 (D-075): RESULTS is hand-written from the

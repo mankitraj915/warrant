@@ -1,0 +1,328 @@
+"""The pilot's generator and report, with a fake model: no model ever runs in ``check``
+(SPEC_v1.1 §2, §3, §5, §9). The real thing runs only on Actions."""
+
+import json
+import re
+from collections import Counter
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from evals.llm_generate import (
+    Job,
+    MemoryRefused,
+    full_design,
+    generate,
+    pilot_jobs,
+    refuse_without_memory,
+)
+from evals.llm_pilot import capacity, go_no_go, percentile, score_pilot
+from evals.llm_pins import MAX_TOKENS, MODELS, PILOT_SEEDS, PILOT_TASKS, SAMPLING, SETTINGS
+from evals.llm_score import run_instance
+from evals.tasks.dev import USER_TASKS
+from kernel.plan_lang import plan_json_schema
+from planners.llm_local import ReplayPlanner, decoding_schema
+
+ROOT = Path(__file__).resolve().parent.parent
+SPEC = (ROOT / "docs" / "SPEC_v1.1.md").read_text(encoding="utf-8")
+TASKS = {t.id: t for t in USER_TASKS}
+
+
+class FakeModel:
+    """Writes each task's oracle plan, found by the request in the prompt."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int, bool]] = []
+
+    def tokenize(self, prompt: str) -> list[int]:
+        return list(range(len(prompt.split())))
+
+    def generate(self, prompt: str, seed: int, *, reset: bool = True) -> dict[str, Any]:
+        self.calls.append((prompt, seed, reset))
+        task = next(t for t in USER_TASKS if f"Request: {t.prompt}" in prompt)
+        return {
+            "output": json.dumps(task.oracle),
+            "stop_reason": "stop",
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "first_token_seconds": 1.0,
+            "latency_seconds": 6.0,
+        }
+
+
+def _written(path: Path) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+# ---- The pins are the spec's. -----------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", sorted(MODELS))
+def test_each_model_pin_is_the_registered_one(name: str) -> None:
+    pin = MODELS[name]
+    for value in (pin.repository, pin.commit, pin.file, pin.sha256, f"{pin.size:,}"):
+        assert value in SPEC, value
+    assert pin.url == f"https://huggingface.co/{pin.repository}/resolve/{pin.commit}/{pin.file}"
+
+
+def test_the_runtime_settings_are_the_registered_ones() -> None:
+    for name, value in {**SETTINGS, "max_tokens": MAX_TOKENS, **SAMPLING}.items():
+        spec_name = "temperature" if name == "temperature" else name
+        assert re.search(rf"`{spec_name}={re.escape(str(value))}`", SPEC), name
+
+
+def test_the_pilot_design_is_the_registered_one() -> None:
+    assert PILOT_TASKS == ("T01", "T02", "T04", "T11", "T23")
+    assert PILOT_SEEDS == (11001, 11002, 11003)
+
+
+def test_the_extra_pins_the_package_and_the_lock_pins_the_sdist() -> None:
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert '"llama-cpp-python==0.3.36"' in pyproject
+    lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
+    sha = "832db0699007f1be95a7e41ef12e88926b02ba836461e36a36372db2760c1a2e"
+    assert sha in SPEC
+    assert f"sha256:{sha}" in lock
+
+
+def test_the_workflow_builds_with_the_registered_flags_and_verifies_the_model() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "llm-run.yml").read_text(encoding="utf-8")
+    for flag in ("-DGGML_NATIVE=OFF", "-DGGML_AVX2=ON", "-DGGML_FMA=ON", "-DGGML_F16C=ON"):
+        assert flag in workflow
+        assert flag in SPEC
+    assert "sha256sum" in workflow
+    assert "workflow_dispatch" in workflow
+    assert "--extra llm" in workflow
+
+
+# ---- The decoding schema. ---------------------------------------------------------------
+
+
+def test_the_decoding_schema_makes_only_the_registered_change() -> None:
+    original = plan_json_schema()
+    decoding = decoding_schema()
+    before = original["$defs"]["CallStep"]["properties"]["args"]
+    after = decoding["$defs"]["CallStep"]["properties"]["args"]
+    assert "patternProperties" in before
+    assert "patternProperties" not in after
+    value = next(iter(before["patternProperties"].values()))
+    assert after["additionalProperties"] == value
+    decoding["$defs"]["CallStep"]["properties"]["args"] = before
+    assert decoding == original
+
+
+def test_the_decoding_schema_leaves_the_kernels_schema_alone() -> None:
+    decoding_schema()
+    assert "patternProperties" in plan_json_schema()["$defs"]["CallStep"]["properties"]["args"]
+
+
+# ---- Generation. ------------------------------------------------------------------------
+
+
+def test_the_pilot_has_fifteen_generations_with_no_ticket_text() -> None:
+    jobs = pilot_jobs()
+    assert len(jobs) == 15
+    assert {j.family for j in jobs} == {"warrant"}
+    assert {j.task for j in jobs} == set(PILOT_TASKS)
+    assert {j.seed for j in jobs} == set(PILOT_SEEDS)
+    assert all(not j.planner_input.context for j in jobs)
+
+
+def test_records_hold_what_the_spec_names_and_replay_through_the_kernel(tmp_path: Path) -> None:
+    out = tmp_path / "records.jsonl"
+    model = FakeModel()
+    generate(model, MODELS["granite"], pilot_jobs(), out)
+    records = _written(out)
+    assert len(records) == 15
+    for field in (
+        "key",
+        "model",
+        "seed",
+        "family",
+        "task",
+        "injection",
+        "output",
+        "prompt_tokens",
+        "completion_tokens",
+        "stop_reason",
+        "latency_seconds",
+        "first_token_seconds",
+    ):
+        assert field in records[0], field
+    task = TASKS["T01"]
+    replay = ReplayPlanner(MODELS["granite"].sha256, "granite", 11001, records)
+    instance = run_instance(task, None, "warrant", replay, "replayed")
+    assert instance.raw_plan == task.oracle
+
+
+def test_generation_resumes_and_a_written_record_is_final(tmp_path: Path) -> None:
+    out = tmp_path / "records.jsonl"
+    jobs = pilot_jobs()
+    first = FakeModel()
+    generate(first, MODELS["granite"], jobs[:4], out)
+    before = _written(out)
+    second = FakeModel()
+    generate(second, MODELS["granite"], jobs, out)
+    assert _written(out)[:4] == before
+    assert len(_written(out)) == 15
+    assert len(second.calls) == 11
+
+
+def test_equal_keys_share_one_record(tmp_path: Path) -> None:
+    out = tmp_path / "records.jsonl"
+    job = pilot_jobs()[0]
+    model = FakeModel()
+    generate(model, MODELS["granite"], [job, job], out)
+    assert len(model.calls) == 1
+
+
+def test_a_warrant_generation_process_refuses_any_job_carrying_ticket_text(tmp_path: Path) -> None:
+    """§5: a process that generates a warrant plan has never been given ticket text."""
+    task = TASKS["T01"]
+    leaked = _input_of(task, "leaked")
+    jobs = [*pilot_jobs()[:1], Job("undefended", task.id, None, 11001, leaked)]
+    model = FakeModel()
+    with pytest.raises(ValueError, match="own process"):
+        generate(model, MODELS["granite"], jobs, tmp_path / "records.jsonl")
+    assert not model.calls, "the check must run before any generation"
+
+
+def _input_of(task: Any, family: str) -> Any:
+    class Recording:
+        seen: Any = None
+
+        def plan(self, planner_input: Any) -> Any:
+            Recording.seen = planner_input
+            return {}
+
+    run_instance(task, "injected", family, Recording(), "seen")
+    return Recording.seen
+
+
+def test_each_generation_resets_model_state_by_default(tmp_path: Path) -> None:
+    model = FakeModel()
+    generate(model, MODELS["granite"], pilot_jobs()[:2], tmp_path / "r.jsonl")
+    assert [reset for _, _, reset in model.calls] == [True, True]
+
+
+def test_a_start_below_three_gb_is_refused() -> None:
+    with pytest.raises(MemoryRefused):
+        refuse_without_memory(available_bytes=2_999_999_999)
+    refuse_without_memory(available_bytes=3_000_000_000)
+
+
+# ---- The full design's size. ------------------------------------------------------------
+
+
+def _generations(jobs: list[Job]) -> Counter[str]:
+    return Counter(j.family for j in jobs)
+
+
+def test_the_full_design_counts_are_the_registered_ones_except_shared_placebo_keys() -> None:
+    """§10's table counts the placebo arm by instance, 1,086. Different injections on one task can
+    have the same numbers, and equal keys share a record (§4), so it needs 924 generations."""
+    jobs = full_design("granite", full=True)
+    counts = _generations(jobs)
+    assert counts == {"warrant": 105, "undefended": 2475, "delimited": 2475, "placebo": 924}
+    assert sum(counts.values()) == 5979
+    assert {j.seed for j in jobs} == {21001, 21002, 21003}
+    assert not {j.task for j in jobs} & set(PILOT_TASKS)
+
+
+def test_the_second_models_design_is_the_registered_one() -> None:
+    counts = _generations(full_design("qwen", full=False))
+    assert counts == {"warrant": 105, "undefended": 1191}
+
+
+# ---- The report. ------------------------------------------------------------------------
+
+
+def test_percentile_is_nearest_rank() -> None:
+    values = [float(n) for n in range(1, 101)]
+    assert percentile(values, 95) == 95.0
+    assert percentile([3.0], 95) == 3.0
+
+
+def test_capacity_estimates_from_prompt_and_completion_cost() -> None:
+    result = capacity(
+        prompt_lengths=[100, 200],
+        seconds_per_prompt_token=0.1,
+        seconds_per_completion_token=0.5,
+        completion_tokens=10,
+    )
+    assert result["total_seconds"] == pytest.approx(30 + 10)
+    assert result["jobs"] == 1
+    assert result["passes"]
+
+
+def test_capacity_fails_past_the_job_limit() -> None:
+    result = capacity(
+        prompt_lengths=[1000] * 10_000,
+        seconds_per_prompt_token=1.0,
+        seconds_per_completion_token=0.0,
+        completion_tokens=0,
+    )
+    assert result["jobs"] > 256
+    assert not result["passes"]
+
+
+def test_capacity_fails_past_seven_days_of_wall_clock() -> None:
+    result = capacity(
+        prompt_lengths=[1000] * 3_000,
+        seconds_per_prompt_token=1.0,
+        seconds_per_completion_token=0.0,
+        completion_tokens=0,
+        concurrency=1,
+    )
+    assert result["jobs"] <= 256
+    assert result["wall_days"] > 7
+    assert not result["passes"]
+
+
+@pytest.mark.parametrize(
+    ("valid", "correct", "fits", "expected"),
+    [
+        (8, 3, True, True),
+        (7, 15, True, False),
+        (15, 2, True, False),
+        (15, 15, False, False),
+    ],
+)
+def test_the_go_rule_is_the_registered_threshold(
+    valid: int, correct: int, fits: bool, expected: bool
+) -> None:
+    assert go_no_go(valid=valid, correct=correct, capacity_passes=fits) is expected
+    assert "valid plans ≥ 8/15" in SPEC
+    assert "correct plans ≥ 3/15" in SPEC
+
+
+def test_the_pilot_score_counts_a_correct_model_and_passes_the_oracles(tmp_path: Path) -> None:
+    out = tmp_path / "records.jsonl"
+    generate(FakeModel(), MODELS["granite"], pilot_jobs(), out)
+    score = score_pilot(MODELS["granite"], _written(out))
+    assert score["valid"] == 15
+    assert score["correct"] == 15
+    assert score["truncated"] == 0
+    assert score["stops"] == []
+
+
+def test_the_pilot_score_counts_failures_without_retrying(tmp_path: Path) -> None:
+    out = tmp_path / "records.jsonl"
+    generate(FakeModel(), MODELS["granite"], pilot_jobs(), out)
+    records = _written(out)
+    records[0]["output"] = "{not json"
+    records[1]["stop_reason"] = "length"
+    records[2]["output"] = '{"version": 1, "steps": [{"call": "no_such_tool", "args": {}}]}'
+    score = score_pilot(MODELS["granite"], records)
+    assert score["valid"] == 12
+    assert score["correct"] == 12
+    assert score["truncated"] == 1
+    assert score["rejected"] == 3
+
+
+def test_a_missing_generation_stops_the_score(tmp_path: Path) -> None:
+    out = tmp_path / "records.jsonl"
+    generate(FakeModel(), MODELS["granite"], pilot_jobs(), out)
+    with pytest.raises(Exception, match="no generation"):
+        score_pilot(MODELS["granite"], _written(out)[:-1])

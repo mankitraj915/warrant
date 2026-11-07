@@ -426,6 +426,9 @@ Pair counts were computed at a2cadee: 414 dev and 488 holdout pairs less those o
 | Placebo arm (dev) | 1,086 | not run |
 | **Total** | **6,141** | **1,296** |
 
+The placebo arm's 1,086 counts instances. Different injections on one task can reduce to the same numbers, and equal keys share a
+record (§4), so it needs 924 generations and the primary's total is 5,979 (D-087; `tests/test_llm_generate.py` pins this).
+
 The primary runs all four configurations on both suites, plus the placebo arm on dev. The second runs `warrant+llm`, `undefended+llm` and
 `leaked+llm` on the dev suite only. Run time is unmeasured until the pilot.
 
@@ -488,7 +491,8 @@ Any change to this file's definitions, thresholds, pins, prompt, seeds or task s
 reported.
 
 Deviations so far: D-084 (names only: injection-serving plan rate and hijack rate); D-086 (adds the chat
-template pins in §3, no change to any definition, no results existed).
+template pins in §3, no change to any definition, no results existed); D-087 (the placebo arm's generation count, arithmetic
+only, no results existed).
 
 ## 13. Open before the pilot
 
