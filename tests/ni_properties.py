@@ -86,9 +86,13 @@ def _case_ticket_origins(ticket: int) -> set[str]:
     return {cell_origin("tickets", ticket, c) for c in ("subject", "body", "@row")}
 
 
+# What each rule may never endorse: it rejects these when untrusted (DESIGN §6.2, §6.3).
+_MUST_BE_TRUSTED = {OWNERSHIP: ("ticket_id",), GOODWILL: ("ticket_id", "amount", "reason")}
+
+
 def check_ni2(r: RunResult) -> None:
-    """Every untrusted ALLOW has its own logged admitting decision, and the
-    endorsed origins lie within that rule's declared set."""
+    """Every untrusted ALLOW has its own logged admitting decision, the components the rule
+    may never endorse are trusted, and the endorsed origins lie within its declared set."""
     sites = [a.site for a in r.actions]
     if len(set(sites)) != len(sites):
         raise NIViolation(f"NI-2 action sites are not unique: {sites}")
@@ -99,6 +103,10 @@ def check_ni2(r: RunResult) -> None:
         if admitted.get(a.site) is None or admitted[a.site] != v.rule:
             raise NIViolation(f"NI-2 untrusted action allowed without a rule: {a.site} {v}")
         if v.rule in (OWNERSHIP, GOODWILL):
+            labels = a.component_labels()
+            for name in _MUST_BE_TRUSTED[v.rule]:
+                if not labels[name].trusted:
+                    raise NIViolation(f"NI-2 {v.rule} admitted an untrusted {name}: {a.site}")
             allowed = _case_ticket_origins(int(a.canonical_args()["ticket_id"]))
             origins = join(*a.component_labels().values()).untrusted
             if not origins <= allowed:
