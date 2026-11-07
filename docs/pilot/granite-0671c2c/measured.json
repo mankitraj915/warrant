@@ -1,0 +1,23 @@
+{
+ "model": "granite-3.3-2b-instruct-Q4_K_M.gguf",
+ "system_info": "CPU : SSE3 = 1 | SSSE3 = 1 | AVX = 1 | AVX2 = 1 | F16C = 1 | FMA = 1 | BMI2 = 1 | LLAMAFILE = 1 | OPENMP = 1 | REPACK = 1 | ",
+ "load_seconds": 1.66688066399999,
+ "grammar_conversion_seconds": 0.009327449000011256,
+ "grammar_native_overhead_seconds": 0.009662413999649289,
+ "determinism": {
+  "same_with_reset": true,
+  "same_with_prefix_reuse": true,
+  "first_token_seconds": {
+   "reset": 64.62822736600037,
+   "prefix_reuse": 0.8923486130001947,
+   "reset_again": 64.46124872200016
+  },
+  "outputs": [
+   "{\"version\":1,\"steps\":[{\"call\":\"issue_refund\",\"args\":{\"ticket_id\":{\"lit\":4010},\"order_id\":{\"lit\":7010},\"amount\":{\"lit\":7010000}}}]}",
+   "{\"version\":1,\"steps\":[{\"call\":\"issue_refund\",\"args\":{\"ticket_id\":{\"lit\":4010},\"order_id\":{\"lit\":7010},\"amount\":{\"lit\":7010000}}}]}",
+   "{\"version\":1,\"steps\":[{\"call\":\"issue_refund\",\"args\":{\"ticket_id\":{\"lit\":4010},\"order_id\":{\"lit\":7010},\"amount\":{\"lit\":7010000}}}]}"
+  ]
+ },
+ "run_seconds": 2582.886753269,
+ "peak_memory_kib": 3342360
+}
