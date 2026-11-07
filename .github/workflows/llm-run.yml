@@ -1,0 +1,93 @@
+name: real-model pilot
+
+# SPEC_v1.1 §9. Manually triggered, on a standard runner: download and verify the pinned model,
+# build the pinned package from its sdist, generate, then score with no model. Every model run
+# for this project happens here, never on a laptop. Results are uploaded even if a step fails.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "pinned model (evals/llm_pins.py)"
+        required: true
+        type: choice
+        options: [granite, qwen]
+
+permissions:
+  contents: read
+
+jobs:
+  pilot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    env:
+      OUT: results/llm-pilot-${{ inputs.model }}
+      # The binary must not vary with the runner's CPU model (§2).
+      CMAKE_ARGS: "-DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.29"
+          python-version: "3.12"
+      - name: Build the pinned package from its sdist
+        run: |
+          mkdir -p "$OUT"
+          start=$(date +%s)
+          uv sync --locked --extra llm --no-binary-package llama-cpp-python
+          echo $(( $(date +%s) - start )) > "$OUT/build_seconds.txt"
+      - name: Record the commit and the runner
+        run: |
+          uv run --locked --extra llm --no-binary-package llama-cpp-python python - <<'EOF' > "$OUT/runner.json"
+          import json, os, platform
+          meminfo = dict(line.split(":", 1) for line in open("/proc/meminfo"))
+          cpu = next((l.split(":", 1)[1].strip() for l in open("/proc/cpuinfo") if l.startswith("model name")), "")
+          print(json.dumps({
+              "commit": os.environ["GITHUB_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "runner_os": os.environ.get("ImageOS", ""),
+              "runner_image_version": os.environ.get("ImageVersion", ""),
+              "cpus": os.cpu_count(),
+              "cpu_model": cpu,
+              "mem_total": meminfo["MemTotal"].strip(),
+              "mem_available": meminfo["MemAvailable"].strip(),
+              "python": platform.python_version(),
+              "platform": platform.platform(),
+              "cmake_args": os.environ["CMAKE_ARGS"],
+          }, indent=1))
+          EOF
+          cat "$OUT/runner.json"
+      - name: Resolve the model pin
+        id: pin
+        run: |
+          uv run --locked python - <<'EOF' >> "$GITHUB_OUTPUT"
+          from evals.llm_pins import MODELS
+          pin = MODELS["${{ inputs.model }}"]
+          print(f"url={pin.url}")
+          print(f"file={pin.file}")
+          print(f"sha256={pin.sha256}")
+          EOF
+      - uses: actions/cache@v4
+        with:
+          path: models/${{ steps.pin.outputs.file }}
+          key: model-${{ steps.pin.outputs.sha256 }}
+      - name: Download and verify the model
+        run: |
+          mkdir -p models
+          path="models/${{ steps.pin.outputs.file }}"
+          [ -f "$path" ] || curl -sSfL -o "$path" "${{ steps.pin.outputs.url }}"
+          echo "${{ steps.pin.outputs.sha256 }}  $path" | sha256sum -c -
+      - name: Generate
+        run: |
+          uv run --locked --extra llm --no-binary-package llama-cpp-python python -m evals.llm_generate pilot \
+            --model "${{ inputs.model }}" \
+            --model-path "models/${{ steps.pin.outputs.file }}" \
+            --out "$OUT"
+      - name: Score, with no model
+        run: uv run --locked python -m evals.llm_pilot --model "${{ inputs.model }}" --raw "$OUT"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: llm-pilot-${{ inputs.model }}
+          path: ${{ env.OUT }}
+          retention-days: 90

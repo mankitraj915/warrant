@@ -38,6 +38,8 @@ TRACE = [[PY, "-m", "evals.trace"]]
 FUZZ_CHUNKS = [[PY, "scripts/fuzz_chunks.py"]]
 PHASE3_RUN = [[PY, "scripts/phase3_run.py"]]
 DEMO = [[PY, "scripts/demo.py"]]
+LLM_GENERATE = [[PY, "-m", "evals.llm_generate"]]
+LLM_PILOT = [[PY, "-m", "evals.llm_pilot"]]
 
 TARGETS: dict[str, list[list[str]]] = {
     "lint": LINT,
@@ -51,6 +53,8 @@ TARGETS: dict[str, list[list[str]]] = {
     "sweep": SWEEP,
     "trace": TRACE,
     "demo": DEMO,
+    "llm-generate": LLM_GENERATE,
+    "llm-pilot": LLM_PILOT,
 }
 ENV: dict[str, dict[str, str]] = {"fuzz": FUZZ_ENV}
 

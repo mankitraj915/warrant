@@ -9,6 +9,10 @@ dependencies = [
     "pydantic>=2.9,<3",
 ]
 
+[project.optional-dependencies]
+# The real-model planner (SPEC_v1.1 §2). Never needed by `check`; built from the sdist on Actions.
+llm = ["llama-cpp-python==0.3.36"]
+
 [dependency-groups]
 dev = [
     "hypothesis>=6.100",

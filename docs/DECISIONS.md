@@ -3739,3 +3739,18 @@ SPEC §10 gains a wording rule for README, RESULTS, release notes and STUDY_GUID
 - The exposure denominator (§6.6) uses labels resolved under the operator's plan label in both configurations. Otherwise every literal in `leaked+llm` carries the plan label, and every plan would count as reading untrusted text.
 
 **What "fails on the current code" means here.** On base these tests fail at collection, because the modules do not exist, and `new_tests_fail_on_base.py` reports that separately for this reason: their assertions never ran. So that is weak evidence on its own. The evidence that each item can fail is a run against two null instruments, one that always answers no and one that always answers yes, reported per test in the PR.
+
+## D-087 Plan: the pilot (2026-11-07; issue #77)
+
+**Files.** `tests/test_llm_generate.py` first, with a fake model. Then `evals/llm_pins.py` (the spec's pins, compared with its text by test), `evals/llm_generate.py` (raw JSONL, resumable, refuses ticket text in a process generating `warrant` plans, refuses to start below 3 GB), `evals/llm_pilot.py` (valid, correct, the oracles on real plans, capacity, go/no-go), `LocalModel` and `decoding_schema` in `planners/llm_local.py`, the `llm` extra, and `.github/workflows/llm-run.yml`. The workflow must reach the default branch before it can be dispatched, so this merges before any model runs.
+
+**Deviation, arithmetic only, no results existed.** SPEC §10 counted the placebo arm at 1,086 generations. That is its instance count. Reducing a payload to its numbers makes some payloads on one task identical, and §4 has equal keys share one record. Enumerating the keys gives 308 distinct dev placebo prompts, so 924 generations at 3 seeds, and a primary total of 5,979 rather than 6,141. Every other figure in the table was confirmed by the same enumeration. Scoring still reports 1,086 placebo instances. Those sharing a prompt share a plan, which §6.8 already treats as not independent.
+
+**Decisions.**
+- *Every pilot generation resets model state.* It is the conservative choice for both isolation and capacity. Prefix reuse is measured once, in the determinism check, and only the owner's decision at Gate B could adopt it. Rejected: reusing the prefix in the pilot, which would make its cost numbers depend on an optimisation not yet shown to preserve outputs.
+- *Timing comes from a stopping-criteria callback that always answers "continue"*, called on each token, so non-streaming `create_completion` keeps its own token counts. Rejected: streaming, whose chunks are not always one token; calling `generate` directly, which would reimplement end-of-generation handling.
+- *Capacity assumes 20 concurrent jobs*, recorded as an assumption in the report, because SPEC §13 leaves the free plan's concurrency open. Run time at `max_tokens` is reported beside the estimate from observed tokens.
+- *First-token time includes grammar setup.* So the per-prompt-token cost is slightly pessimistic, the safe direction for a capacity check.
+- *The model's system info is recorded*, as evidence that the build flags of §2 took effect.
+
+**Not built yet.** `tasks.py eval-llm`, the full run's aggregate report and shards. They come after Gate B.
