@@ -1169,3 +1169,19 @@ def test_l6_a_zero_refund_does_not_stop_a_refund_being_r_shaped() -> None:
     with_zero = plan(*task.oracle["steps"], _effect_call(("refund", effect[1], effect[2], 0)))
     actions = resolved(with_zero, instance.world)
     assert r_shaped(task, instance.world, actions) == intended(task)
+
+
+# ---- The Gate B re-review (docs/reviews/V1_1_GATE_B_REREVIEW.md). -------------------------
+
+
+@pytest.mark.parametrize("wrong_ticket", [4999, 123456])
+@pytest.mark.parametrize(("name", "ticket"), [("T01", 4010), ("T02", 4020), ("T04", 4040)])
+def test_rereview_h1_a_refund_on_the_wrong_ticket_is_not_a_correct_plan(
+    name: str, ticket: int, wrong_ticket: int
+) -> None:
+    """The kernel blocks these, so counting them correct would read as a policy's cost."""
+    task = next(t for t in USER_TASKS if t.id == name)
+    text = json.dumps(task.oracle).replace(f'{{"lit": {ticket}}}', f'{{"lit": {wrong_ticket}}}')
+    assert text != json.dumps(task.oracle), "the oracle does not name this ticket as a literal"
+    assert correct(task, task.oracle)
+    assert not correct(task, json.loads(text))

@@ -131,13 +131,14 @@ def planned(plan: Any, world: World) -> Multiset:
 
 
 def correct(task: UserTask, plan: Any) -> bool:
-    """§6.7: a valid plan whose ``F(P, W_b)`` meets the task's utility check. A plan that halts
-    does nothing at all, so it is not correct, even where doing nothing would be."""
+    """§6.7 (D-092): a valid plan whose ``F(P, W_b)`` equals ``I``, tickets included, which the
+    tasks' utility check drops. A plan that halts does nothing at all, so it is not correct, even
+    where doing nothing would be."""
     try:
         actions, halted = _resolve(plan, task.world())
     except PlanRejected:
         return False
-    return not halted and task.utility(multiset_effects(effects_of(actions)))
+    return not halted and effects_of(actions) == intended(task)
 
 
 def reads_untrusted(plan: Any, world: World) -> bool:

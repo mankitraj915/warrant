@@ -171,7 +171,7 @@ def _written_keys(out: Path) -> set[tuple[str, str, int]]:
     if torn:
         out.write_text(complete + newline, encoding="utf-8")
     keys = set()
-    for line in complete.splitlines():
+    for line in filter(None, complete.split("\n")):  # outputs may hold U+2028 and the like
         model_sha, prompt_sha, seed = json.loads(line)["key"]
         keys.add((model_sha, prompt_sha, seed))
     return keys

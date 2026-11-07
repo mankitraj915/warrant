@@ -142,8 +142,9 @@ def _costs(records: list[dict[str, Any]]) -> dict[str, float]:
 
 
 def report(pin: ModelPin, raw: Path) -> dict[str, Any]:
-    lines = (raw / "records.jsonl").read_text(encoding="utf-8").splitlines()
-    records = [json.loads(line) for line in lines]
+    # Only "\n" ends a record: an output may hold U+2028 and the like.
+    lines = (raw / "records.jsonl").read_text(encoding="utf-8").split("\n")
+    records = [json.loads(line) for line in lines if line]
     measured = json.loads((raw / "measured.json").read_text(encoding="utf-8"))
     score = score_pilot(pin, records)
     # Compared with plan_v1 only: these seeds decide nothing, but a broken oracle is a stop (D-090).
