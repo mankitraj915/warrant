@@ -1,0 +1,13 @@
+{
+ "commit": "12295ac726e14d047986dfdd6d2b95d71ba48195",
+ "run_id": "42523326321",
+ "runner_os": "ubuntu24",
+ "runner_image_version": "20261101.360.1",
+ "cpus": 4,
+ "cpu_model": "INTEL(R) XEON(R) PLATINUM 8573C",
+ "mem_total": "16366508 kB",
+ "mem_available": "15028896 kB",
+ "python": "3.12.3",
+ "platform": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+ "cmake_args": "-DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON"
+}

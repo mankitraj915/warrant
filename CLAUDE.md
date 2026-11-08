@@ -93,7 +93,8 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
   the design's prompts in their own process, D-088) and `llm-pilot --model NAME --raw DIR`: the pilot's
   generation and its model-free report (SPEC_v1.1 §9). The first pilot's data is in
   `docs/pilot/granite-2a7e428/` (D-089); it replays only at a commit before `plan_v2` and the seed change
-  (D-091). The repeat's is in `docs/pilot/granite-0671c2c/` (D-093). Generation needs the `llm` extra
+  (D-091). The repeat's is in `docs/pilot/granite-0671c2c/` (D-093), and Qwen's is in
+  `docs/pilot/qwen-12295ac/` (D-095). Generation needs the `llm` extra
   and runs only on Actions: `gh workflow run llm-run.yml -f model=granite`, which uploads the records.
 - `eval-llm`: evaluation with a local model. Not built yet (D-074); v1.1 builds it as
   `eval-llm --raw DIR`, scoring raw generations with no model (D-077, D-080).
@@ -107,26 +108,21 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 
 ## Current status
 
-**Now: v1.1, Gate B, the Qwen attempt (the last one under the stop rule, SPEC_v1.1 §9, D-090, D-094).**
-Attempts so far (ledger in D-092 and D-094), on decision seeds unless stated:
+**Now: v1.1, stopped at ⛔ Gate B, waiting for the owner. Qwen passed the pilot (D-095).**
+Attempts (ledger in D-092 and D-094), on the decision seeds 11101–11103:
 - First pilot, Granite on `plan_v1`: 4/15 valid, 1/15 correct (run 42358159130, D-089).
 - Repeat, Granite on `plan_v2`: 7/15 valid, 1/15 correct (run 42377342673, D-093).
-- Qwen2.5-1.5B on `plan_v2`: run 42523326321 at 12295ac, dispatched 2026-11-08, with no code changes.
+- Qwen2.5-1.5B on `plan_v2`: 11/15 valid, 11/15 correct, capacity passes, no stop (run 42523326321 at
+  12295ac, `docs/pilot/qwen-12295ac/`, D-095).
 
-**To resume:** read the run with `gh run view 42523326321`, and if it is complete, download it into an empty
-directory. Re-score it with `tasks.py llm-pilot --model qwen --raw DIR` on a copy, and commit the data to
-`docs/pilot/qwen-12295ac/`. Never re-dispatch except on the same seeds after an infrastructure fault, with
-the cause recorded.
-- **Qwen passes** (valid ≥ 8/15 and correct ≥ 3/15 on 11101–11103, capacity passes, no stop): stop at ⛔
-  Gate B with the report. Tag `v1.1-gate-b` only then. Before any full run, close #87 and build `eval-llm`,
-  then give it an independent review.
-- **Qwen fails:** prepare v1.1 as a negative result. Write a RESULTS section from the pilot data, update the
-  README limitation ("no real model reliably produced plans; security results unchanged"), add a
-  WHAT_WENT_WRONG entry, and get an independent review. Then tag `v1.1.0`, and stop for the owner's go before
-  any release. #87 then closes as not needed, except M2, which is a kernel fault in its own right.
-No further prompt iterations. The T02 limitation is in RESULTS and WHAT_WENT_WRONG. #92 is future work, with
-no kernel change in v1.1. Issue #87 lists
-what the Gate B re-review requires before any full run (D-092).
+Under §1, if the owner accepts, Qwen takes the primary's full scope in §10 and Granite is not run. The
+`v1.1-gate-b` tag is not created and waits for the owner. Before any full run:
+- close #87 (the re-review's remaining findings);
+- build `eval-llm`, and give it an independent review;
+- re-review the code changed since 0671c2c (D-092's fixes).
+
+The T02 limitation is in RESULTS and WHAT_WENT_WRONG. #92 is future work, with no kernel change in v1.1.
+Ask before changing any registered definition.
 Gate A passed (owner, 2026-11-07): tag
 `v1.1-gate-a` at 3741310; the raw count is the "injection-serving plan rate" and "hijack rate" is
 reserved for the attributable class (D-084). #70 is fixed (D-085). The instrument is calibrated in

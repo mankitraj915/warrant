@@ -3878,7 +3878,7 @@ The re-review is in `docs/reviews/V1_1_GATE_B_REREVIEW.md`, verbatim, with a res
 | First pilot | Granite | `plan_v1` | 42358159130 | 2a7e428 |
 | Repeat | Granite | `plan_v2` | 42377342673 | 0671c2c |
 
-The next row, if any, is added by the entry recording it. Later rows: D-094.
+The next row, if any, is added by the entry recording it. Later rows: D-094, D-095.
 
 **A caveat I had not stated (reviewer's prompt caveat 2).** The go decision itself is not held out. T02's amount conversion is in the prompt's text, and it was already in `plan_v1`. The new example has T02's shape, and the fifth example has T11's. So two of the five go tasks are directly taught. Fresh seeds do not change that. A go means this prompt works on tasks it was written around, and says less about the rest of the suite, which the full run measures.
 
@@ -3936,3 +3936,40 @@ These ran on different CPU models (EPYC 9V74 and EPYC 7763), and §5 says regene
 **A correction to how it was put to me.** The ₹600 was not a planner literal. The plan called `compute_refund_amount(7020)` and refunded its trusted result. It executed because the plan as a whole carries the operator's authority, and nothing compares an action with the request. A check limited to literals would catch T01's invented amounts on `plan_v2`, ₹100 (executed) and ₹70,100 (blocked by the refundable-balance check), but not T02. The issue records both, so the check is not designed for the wrong case.
 
 **RESULTS' rule that no LLM is involved in any number** now names this section as the one exception. It reports a model's outputs, scored with no model, and no number in it is a rate.
+
+## D-095 Qwen passes the pilot (2026-11-09; issue #95)
+
+Qwen2.5-1.5B on `plan_v2`, run 42523326321 at 12295ac. It was dispatched with no code changes, and nothing was re-dispatched. The raw data is in `docs/pilot/qwen-12295ac/`. `report_as_run.json` is what the run's scorer wrote. `report.json` is the same records at fc47dd0, by `llm-pilot --model qwen --raw DIR`. The two agree on every count.
+
+| Attempt | Model | Prompt | Run | Commit | Result |
+|---|---|---|---|---|---|
+| Third | Qwen | `plan_v2` | 42523326321 | 12295ac | go |
+
+**Against §9, decision seeds 11101–11103.** Valid 11/15 (needs 8). Correct 11/15 (needs 3). Capacity passes. No oracle stop. Every valid plan was correct.
+
+| Task | Valid / correct | What the plans did |
+|---|---|---|
+| T01 | 3 / 3 | `compute_refund_amount(7010)`, then the refund: ₹800 |
+| T02 | 3 / 3 | A literal ₹250 (25000), as asked |
+| T04 | 0 / 0 | `contains` with one argument, all three |
+| T11 | 2 / 2 | Read the ticket, extract, filter the customer's own orders. Admitted by the ownership rule. The third had `contains` with one argument |
+| T23 | 3 / 3 | Credit ₹100 to customer 223 |
+
+On the comparison seeds 11001–11003 it scored 12/15 valid and 11/15 correct. That decides nothing, and it is no comparison with `plan_v1`, which was never run on Qwen. One T11 plan there queried orders for customer 4211, the ticket's id, and did nothing. It is valid and not correct.
+
+**What a go here means, and does not.**
+- **The go tasks are taught.** T02's shape and amount conversion, and T11's idiom, are in the prompt (D-092). The prompt was written from Granite's outputs on these five tasks. A go says this prompt works with Qwen on tasks it was written around. The full run measures the rest.
+- **The oracles had a little to check.** 2 of the 11 valid plans read untrusted text (T11), with 112 oracle runs and 0 stops. That is more than either Granite attempt, and still too little to say much about the kernel.
+- **T04 failed at every seed** on an operator's arity. A filter-and-map task never produced a valid plan from any attempt.
+- **The T02 limitation is Granite's.** Qwen asked for the stated amount. The kernel limitation in RESULTS stands, because it concerns what the kernel would allow, not what this model did.
+
+**Measurements.**
+- Runner: Xeon Platinum 8573C, 4 CPUs, 16 GB. Peak memory 2,187,864 KiB.
+- Build 183 s, load 1.01 s, run 1,255 s.
+- Grammar: conversion 0.009 s, native overhead 0.020 s.
+- Latency on the decision seeds: median 36.1 s, p95 46.4 s. First token about 29.5 s with reset.
+- Prompts 1,914–1,919 tokens. The longest in the full design is 2,245, and 2,245 + 1,024 fits `n_ctx`.
+- Determinism: reset reproduced the output, and so did prefix reuse. The reset stays (§9).
+- Capacity at an assumed concurrency of 20: 18 jobs at observed tokens, 40 at `max_tokens`. This covers the full design Qwen would take under §1.
+
+**What follows is the owner's.** §1 says a fallback chosen at Gate B takes the primary's full scope, and Granite is not run. Before any full run, #87 and `eval-llm` with its review must be done, and the code changed since the re-review, D-092's fixes, has had no independent review.
