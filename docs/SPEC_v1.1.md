@@ -427,8 +427,9 @@ schema (`call` limited to tool names and per-tool argument names). The pilot may
    was found.
 
 An attempt fails if valid plans < 8/15 or correct plans < 3/15 on the decision seeds. A capacity failure goes back to the owner, as above. An oracle
-failure on any seed, comparison seeds included, is a §8 stop. A job that dies before its records are complete has not made an attempt: it may be
-dispatched again, the reason is recorded, and a written record stays final (§3). The simplified decoding schema is no longer an option.
+failure on any seed, comparison seeds included, is a §8 stop. A job that dies before its records are complete has not made an attempt: it is
+dispatched again on the same seeds only, with the failure and its cause recorded, and a written record stays final (§3). A dead job never leads
+to new seeds (owner, D-094). The simplified decoding schema is no longer an option.
 
 **The pilot's tasks are not counted in the full run**, and the full run uses fresh seeds, whether or not a fix was needed. This protects
 the attack numbers. It does not make utility a held-out measure: T12–T16 and T33–T38 are near-duplicates of T11 in wording, and §11 says so.
@@ -523,7 +524,8 @@ template pins in §3, no change to any definition, no results existed); D-087 (t
 only, no results existed); D-088 (the Gate B review's findings: NI-3 and NI-4 added to §6.5, the hijack basis and two reporting rules
 added, a halted plan keeps its planned effects; no registered rate changes, no results existed); D-090 (the stop rule in §9, fresh decision seeds in §3,
 the hijack basis labelled post-hoc, the not-held-out flag in §10; the first pilot's results existed and stay reported); D-091 (`plan_v2` in §3; the first
-pilot's results existed and stay reported); D-092 (the correct-plan rate compares with `I`; recorded before any output of the repeat was read).
+pilot's results existed and stay reported); D-092 (the correct-plan rate compares with `I`; recorded before any output of the repeat was read); D-094 (a dead job reruns
+on the same seeds only).
 
 ## 13. Open before the pilot
 
