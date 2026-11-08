@@ -3878,7 +3878,7 @@ The re-review is in `docs/reviews/V1_1_GATE_B_REREVIEW.md`, verbatim, with a res
 | First pilot | Granite | `plan_v1` | 42358159130 | 2a7e428 |
 | Repeat | Granite | `plan_v2` | 42377342673 | 0671c2c |
 
-The next row, if any, is added by the entry recording it.
+The next row, if any, is added by the entry recording it. Later rows: D-094.
 
 **A caveat I had not stated (reviewer's prompt caveat 2).** The go decision itself is not held out. T02's amount conversion is in the prompt's text, and it was already in `plan_v1`. The new example has T02's shape, and the fifth example has T11's. So two of the five go tasks are directly taught. Fresh seeds do not change that. A go means this prompt works on tasks it was written around, and says less about the rest of the suite, which the full run measures.
 
@@ -3919,3 +3919,20 @@ These ran on different CPU models (EPYC 9V74 and EPYC 7763), and §5 says regene
 **Capacity.** 30 jobs at observed tokens and 55 at `max_tokens`, both inside the limit, at an assumed concurrency of 20. The longest prompt is now 2,457 tokens, and 2,457 + 1,024 fits `n_ctx`. Generation is slower here than in the first pilot, on a different CPU and with about 315 more prompt tokens: first token about 64.5 s against 44 s. The workflow's separate `lengths` step passed on its first run.
 
 **Next, under the stop rule.** One Qwen attempt on `plan_v2`, with the same seeds and thresholds. The owner said to stop at Gate B after the repeat, so that dispatch waits for the owner's word.
+
+## D-094 The owner's decisions on the repeat, and the T02 limitation (owner, Gate B, 2026-11-09; issue #93)
+
+**Decisions.**
+- **Qwen.** The one Qwen2.5-1.5B attempt on `plan_v2` is dispatched with no code changes, on the decision seeds 11101–11103, with the same thresholds.
+  | Attempt | Model | Prompt | Run | Commit |
+  |---|---|---|---|---|
+  | Third | Qwen | `plan_v2` | 42523326321 | 12295ac |
+- **D-090's readings accepted, with one tightening.** A job that dies from an infrastructure fault is rerun on the same seeds only, with the failure and its cause recorded. A dead job never leads to new seeds. This is in §9.
+- **D-092 accepted.** The owner's rule from now on: ask before changing any registered definition, even to tighten it. I changed §6.7 without asking, and that should have been a question. It is in CLAUDE.md.
+- **If Qwen fails,** v1.1 is prepared as a negative result. That means: a RESULTS section from the pilot data; the README limitation ("no real model reliably produced plans; security results unchanged"); a WHAT_WENT_WRONG entry; an independent review; then tag `v1.1.0` and stop for the owner's go. **If Qwen passes,** stop at Gate B with the report.
+
+**The T02 finding.** The owner asked for it to be recorded now, in RESULTS (as a limitation) and WHAT_WENT_WRONG, with an issue for a possible literal-provenance check as future work only (#92). No kernel change is made during v1.1.
+
+**A correction to how it was put to me.** The ₹600 was not a planner literal. The plan called `compute_refund_amount(7020)` and refunded its trusted result. It executed because the plan as a whole carries the operator's authority, and nothing compares an action with the request. A check limited to literals would catch T01's invented amounts on `plan_v2`, ₹100 (executed) and ₹70,100 (blocked by the refundable-balance check), but not T02. The issue records both, so the check is not designed for the wrong case.
+
+**RESULTS' rule that no LLM is involved in any number** now names this section as the one exception. It reports a model's outputs, scored with no model, and no number in it is a rate.

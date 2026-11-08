@@ -30,6 +30,8 @@ The non-interference test in `docs/SPEC.md` §5 is how we check this invariant. 
 - **At each gate, run an independent review first.** Spawn a reviewer subagent that gets only the threat model, the design doc, and the code. It never sees your reasoning or the eval results. Its job is to find a way to violate the invariant. Include its findings verbatim in the gate report and address each one.
 - **Commit after each coherent step** with a descriptive message. Keep `scripts/tasks.py check` green on every commit.
 - **No attribution lines.** No co-author trailer or "Generated with" line on commits, pull requests or releases (owner, 2026-11-06; `.claude/settings.json`). Earlier commits stay as they are. Nothing may claim that code or text was written by hand.
+- **Ask before changing any registered definition**, even to tighten it (owner, 2026-11-09, D-094).
+  Pre-registered definitions, thresholds, pins, seeds and task selection are the owner's to change.
 - **Ask the owner** only about scope changes or gate outcomes that change direction. For everything else, decide, record it in `docs/DECISIONS.md`, and continue.
 - **Keep this file current.** Update "Current status" and "Commands" as they change, so a future session can resume cold.
 
@@ -105,13 +107,25 @@ and gate reports. The `Makefile` is a thin convenience alias (`make <target>` ru
 
 ## Current status
 
-**Now: v1.1, stopped at ⛔ Gate B, waiting for the owner.** Under the stop rule (SPEC_v1.1 §9, D-090), the
-one prompt revision has run and is also a no-go: 7/15 valid, 1/15 correct on the decision seeds (run
-42377342673, D-093). The first pilot had 4/15 and 1/15 (run 42358159130, D-089). No further prompt
-iterations. Next under the rule, on the owner's word: one Qwen attempt on `plan_v2`
-(`gh workflow run llm-run.yml -f model=qwen`). If that fails, the model work stops and v1.1 is reported as a
-negative result. Tag `v1.1-gate-b` only after a repeat passes. The full run has not started, and `eval-llm`
-is still not built. Issue #87 lists
+**Now: v1.1, Gate B, the Qwen attempt (the last one under the stop rule, SPEC_v1.1 §9, D-090, D-094).**
+Attempts so far (ledger in D-092 and D-094), on decision seeds unless stated:
+- First pilot, Granite on `plan_v1`: 4/15 valid, 1/15 correct (run 42358159130, D-089).
+- Repeat, Granite on `plan_v2`: 7/15 valid, 1/15 correct (run 42377342673, D-093).
+- Qwen2.5-1.5B on `plan_v2`: run 42523326321 at 12295ac, dispatched 2026-11-08, with no code changes.
+
+**To resume:** read the run with `gh run view 42523326321`, and if it is complete, download it into an empty
+directory. Re-score it with `tasks.py llm-pilot --model qwen --raw DIR` on a copy, and commit the data to
+`docs/pilot/qwen-12295ac/`. Never re-dispatch except on the same seeds after an infrastructure fault, with
+the cause recorded.
+- **Qwen passes** (valid ≥ 8/15 and correct ≥ 3/15 on 11101–11103, capacity passes, no stop): stop at ⛔
+  Gate B with the report. Tag `v1.1-gate-b` only then. Before any full run, close #87 and build `eval-llm`,
+  then give it an independent review.
+- **Qwen fails:** prepare v1.1 as a negative result. Write a RESULTS section from the pilot data, update the
+  README limitation ("no real model reliably produced plans; security results unchanged"), add a
+  WHAT_WENT_WRONG entry, and get an independent review. Then tag `v1.1.0`, and stop for the owner's go before
+  any release. #87 then closes as not needed, except M2, which is a kernel fault in its own right.
+No further prompt iterations. The T02 limitation is in RESULTS and WHAT_WENT_WRONG. #92 is future work, with
+no kernel change in v1.1. Issue #87 lists
 what the Gate B re-review requires before any full run (D-092).
 Gate A passed (owner, 2026-11-07): tag
 `v1.1-gate-a` at 3741310; the raw count is the "injection-serving plan rate" and "hijack rate" is
